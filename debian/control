@@ -19,6 +19,6 @@ Package: python3-aiohttp
 Architecture: all
 Depends: ${misc:Depends}, ${python3:Depends}
 Description: http client/server for asyncio
- aiohttp TODO TODO
+ HTTP Client for asyncio.
  .
  This package provides Python 3 module bindings only.
