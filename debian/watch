@@ -1,0 +1,3 @@
+version=3
+https://pypi.python.org/packages/source/a/aiohttp/ \
+    aiohttp-(\d.*).tar.gz
