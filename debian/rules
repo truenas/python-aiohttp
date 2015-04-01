@@ -1,9 +1,6 @@
 #!/usr/bin/make -f
 
-export PYBUILD_NAME=aiohttp
+export PYBUILD_NAME = aiohttp
 
 %:
-	dh $@ --with python3 --buildsystem pybuild
-
-override_dh_installchangelogs:
-	dh_installchangelogs CHANGES.txt
+	dh $@ --with python3,sphinxdoc --buildsystem pybuild
