@@ -3,23 +3,46 @@ Section: python
 Priority: optional
 Maintainer: Debian Python Modules Team <python-modules-team@lists.alioth.debian.org>
 Uploaders: Tianon Gravi <admwiggin@gmail.com>,
-           Paul Tagliamonte <paultag@debian.org>
+           Paul Tagliamonte <paultag@debian.org>,
+           Piotr Ożarowski <piotr@debian.org>
 Build-Depends: debhelper (>= 9),
                dh-python,
-               python3-all (>= 3.4~),
-               python3-nose,
+               python3-all-dev (>= 3.4~),
+               python3-all-dbg (>= 3.4~),
                python3-setuptools,
-               python3-sphinx
+               python3-sphinx,
+               cython3,
+# for tests:
+               python3-nose,
+               python3-chardet
 Standards-Version: 3.9.6
-Homepage: https://github.com/KeepSafe/aiohttp/
+Homepage: https://aiohttp.readthedocs.org
 Vcs-Svn: svn://anonscm.debian.org/python-modules/packages/python-aiohttp/trunk/
 Vcs-Browser: http://anonscm.debian.org/viewvc/python-modules/packages/python-aiohttp/trunk/
 X-Python3-Version: >= 3.4
 
 Package: python3-aiohttp
-Architecture: all
-Depends: ${misc:Depends}, ${python3:Depends}
+Architecture: any
+Depends: ${misc:Depends}, ${python3:Depends}, ${shlibs:Depends}
 Description: http client/server for asyncio
- HTTP Client for asyncio.
+ HTTP Client for asyncio (PEP 3156 - Asynchronous I/O Support).
  .
- This package provides Python 3 module bindings only.
+ Features:
+  * supports both client and server side of HTTP protocol,
+  * supports both client and server Web-Sockets out-of-the-box,
+  * web-server has middlewares and pluggable routing.
+
+Package: python3-aiohttp-dbg
+Architecture: any
+Section: debug
+Priority: extra
+Depends: python3-aiohttp (= ${binary:Version}), ${shlibs:Depends}, ${misc:Depends}, ${python3:Depends}
+Description: http client/server for asyncio - debug version
+ HTTP Client for asyncio (PEP 3156 - Asynchronous I/O Support).
+ .
+ Features:
+  * supports both client and server side of HTTP protocol,
+  * supports both client and server Web-Sockets out-of-the-box,
+  * web-server has middlewares and pluggable routing.
+ .
+ This package contains the extension built for the Python 3 debug interpreter.

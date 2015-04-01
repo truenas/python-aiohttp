@@ -1,5 +1,5 @@
-python-aiohttp (0.15.1-1) UNRELEASED; urgency=medium
+python-aiohttp (0.15.1-1) unstable; urgency=medium
 
   * Initial release.
 
- -- Tianon Gravi <admwiggin@gmail.com>  Thu, 10 Jul 2014 22:00:13 +0200
+ -- Tianon Gravi <admwiggin@gmail.com>  Wed, 01 Apr 2015 23:21:05 +0200
