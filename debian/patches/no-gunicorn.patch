@@ -1,3 +1,6 @@
+Description: patch out gunicorn test requirement (since we don't have a python3 gunicorn yet)
+Author: Tianon Gravi <admwiggin@gmail.com>
+
 --- a/setup.py
 +++ b/setup.py
 @@ -18,7 +18,7 @@
