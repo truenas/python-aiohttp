@@ -1,0 +1,14 @@
+Description: patch out gunicorn test requirement (since we don't have a python3 gunicorn yet)
+Author: Tianon Gravi <admwiggin@gmail.com>
+
+--- a/setup.py
++++ b/setup.py
+@@ -18,7 +18,7 @@
+ else:
+     install_requires = ['asyncio']
+ 
+-tests_require = install_requires + ['nose', 'gunicorn', 'chardet']
++tests_require = install_requires + ['nose', 'chardet']
+ 
+ 
+ def read(f):
