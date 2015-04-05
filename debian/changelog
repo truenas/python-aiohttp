@@ -1,11 +1,5 @@
-python-aiohttp (0.15.1-2) UNRELEASED; urgency=medium
-
-  * Fix license in debian/copyright to match upstream's Apache-2 (since 0.10.0).
-
- -- Tianon Gravi <admwiggin@gmail.com>  Sat, 04 Apr 2015 09:07:00 -0600
-
 python-aiohttp (0.15.1-1) unstable; urgency=medium
 
   * Initial release.
 
- -- Tianon Gravi <admwiggin@gmail.com>  Wed, 01 Apr 2015 23:21:05 +0200
+ -- Tianon Gravi <admwiggin@gmail.com>  Sat, 04 Apr 2015 09:07:00 -0600
