@@ -1,14 +1,16 @@
 Description: patch out gunicorn test requirement (since we don't have a python3 gunicorn yet)
 Author: Tianon Gravi <admwiggin@gmail.com>
 
---- a/setup.py
-+++ b/setup.py
-@@ -18,7 +18,7 @@
- else:
-     install_requires = ['asyncio']
+Index: python-aiohttp/setup.py
+===================================================================
+--- python-aiohttp.orig/setup.py
++++ python-aiohttp/setup.py
+@@ -58,7 +58,7 @@ install_requires = ['chardet']
+ if sys.version_info < (3, 4):
+     install_requires += ['asyncio']
  
--tests_require = install_requires + ['nose', 'gunicorn', 'chardet']
-+tests_require = install_requires + ['nose', 'chardet']
+-tests_require = install_requires + ['nose', 'gunicorn']
++tests_require = install_requires + ['nose']
  
  
  def read(f):

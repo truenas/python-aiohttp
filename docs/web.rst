@@ -128,13 +128,22 @@ so application developer can use classes if he wants::
    app.router.add_route('GET', '/greet/{name}', handler.handle_greeting)
 
 
+.. versionadded:: 0.15.2
+
+   :meth:`UrlDispatcher.add_route` supports wildcard as *HTTP method*::
+
+       app.router.add_route('*', '/path', handler)
+
+   That means the handler for ``'/path'`` is applied for every HTTP method.
+
+
 Custom conditions for routes lookup
 -----------------------------------
 
 Sometimes you need to distinguish *web-handlers* on more complex
 criteria than *HTTP method* and *path*.
 
-While :class:`UrlDispatcher` doesn't accept extra criterias there is an 
+While :class:`UrlDispatcher` doesn't accept extra criterias there is an
 easy way to do the task by implementing the second routing layer by
 hand.
 
@@ -174,6 +183,60 @@ The next example shows custom processing based on *HTTP Accept* header:
    chooser.reg_acceptor('application/xml', handle_xml)
 
 
+Template rendering
+------------------
+
+:mod:`aiohttp.web` has no support for template rendering out-of-the-box.
+
+But there is third-party library :mod:`aiohttp_jinja2` which is
+supported by *aiohttp* authors.
+
+The usage is simple: create dictionary with data and pass it into
+template renderer.
+
+Before template rendering you have to setup *jinja2 environment* first
+(:func:`aiohttp_jinja2.setup` call)::
+
+    app = web.Application(loop=self.loop)
+    aiohttp_jinja2.setup(app,
+        loader=jinja2.FileSystemLoader('/path/to/templates/folder'))
+
+
+After that you may use template engine in your *web-handlers*. The
+most convinient way is to use :func:`aiohttp_jinja2.template`
+decorator::
+
+    @aiohttp_jinja2.template('tmpl.jinja2')
+    def handler(request):
+        return {'name': 'Andrew', 'surname': 'Svetlov'}
+
+
+User sessions
+-------------
+
+Often you need a container for storing per-user data. The concept is
+usually called *session*.
+
+:mod:`aiohttp.web` has no *sessions* but there is third-party
+:mod:`aiohttp_session` library for that::
+
+    import asycio
+    import time
+    from aiohttp import web
+    import aiohttp_session
+
+    @asyncio.coroutine
+    def handler(request):
+        session = yield from aiohttp_session.get_session(request)
+        session['last_visit'] = time.time()
+        return web.Response('OK')
+
+    app = web.Application(middlewares=aiohttp_session.session_middleware([
+        aiohttp_session.EncryptedCookieStorage(b'Sixteen byte key'))])
+
+    app.router.add_route('GET', '/', handler)
+
+
 .. _aiohttp-web-expect-header:
 
 *Expect* header support
@@ -197,7 +260,7 @@ This example shows custom handler for *Except* header:
 
    @asyncio.coroutine
    def check_auth(request):
-       if request.version != web.HttpVersion11:
+       if request.version != aiohttp.HttpVersion11:
            return
 
        if request.headers.get('AUTHORIZATION') is None:

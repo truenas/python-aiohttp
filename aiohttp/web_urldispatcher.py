@@ -8,9 +8,11 @@ import collections
 import mimetypes
 import re
 import os
+import inspect
 
 from urllib.parse import urlencode
 
+from . import hdrs
 from .abc import AbstractRouter, AbstractMatchInfo
 from .protocol import HttpVersion11
 from .web_exceptions import HTTPMethodNotAllowed, HTTPNotFound
@@ -67,12 +69,12 @@ class Route(metaclass=abc.ABCMeta):
     def name(self):
         return self._name
 
-    @abc.abstractmethod
+    @abc.abstractmethod  # pragma: no branch
     def match(self, path):
         """Return dict with info for given path or
         None if route cannot process path."""
 
-    @abc.abstractmethod
+    @abc.abstractmethod  # pragma: no branch
     def url(self, **kwargs):
         """Construct url for route with additional params."""
 
@@ -171,10 +173,12 @@ class StaticRoute(Route):
         if not os.path.exists(filepath) or not os.path.isfile(filepath):
             raise HTTPNotFound()
 
-        ct = mimetypes.guess_type(filename)[0]
+        ct, encoding = mimetypes.guess_type(filename)
         if not ct:
             ct = 'application/octet-stream'
         resp.content_type = ct
+        if encoding:
+            resp.headers['content-encoding'] = encoding
 
         file_size = os.stat(filepath).st_size
         single_chunk = file_size < self.limit
@@ -201,7 +205,21 @@ class StaticRoute(Route):
             directory=self._directory)
 
 
+class SystemRoute(Route):
+
+    def __init__(self, name):
+        super().__init__(hdrs.METH_ANY, None, name)
+
+    def url(self, **kwargs):
+        return ''
+
+    def match(self, path):
+        return None
+
+
 class _NotFoundMatchInfo(UrlMappingMatchInfo):
+
+    route = SystemRoute('')
 
     def __init__(self):
         super().__init__({}, None)
@@ -209,10 +227,6 @@ class _NotFoundMatchInfo(UrlMappingMatchInfo):
     @property
     def handler(self):
         return self._not_found
-
-    @property
-    def route(self):
-        return None
 
     @asyncio.coroutine
     def _not_found(self, request):
@@ -224,6 +238,8 @@ class _NotFoundMatchInfo(UrlMappingMatchInfo):
 
 class _MethodNotAllowedMatchInfo(UrlMappingMatchInfo):
 
+    route = SystemRoute('')
+
     def __init__(self, method, allowed_methods):
         super().__init__({}, None)
         self._method = method
@@ -232,10 +248,6 @@ class _MethodNotAllowedMatchInfo(UrlMappingMatchInfo):
     @property
     def handler(self):
         return self._not_allowed
-
-    @property
-    def route(self):
-        return None
 
     @asyncio.coroutine
     def _not_allowed(self, request):
@@ -255,7 +267,9 @@ class UrlDispatcher(AbstractRouter, collections.abc.Mapping):
     GOOD = r'[^{}/]+'
     ROUTE_RE = re.compile(r'(\{[_a-zA-Z][^{}]*(?:\{[^{}]*\}[^{}]*)*\})')
 
-    METHODS = {'POST', 'GET', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'}
+    METHODS = {hdrs.METH_ANY, hdrs.METH_POST,
+               hdrs.METH_GET, hdrs.METH_PUT, hdrs.METH_DELETE,
+               hdrs.METH_PATCH, hdrs.METH_HEAD, hdrs.METH_OPTIONS}
 
     def __init__(self):
         super().__init__()
@@ -267,15 +281,17 @@ class UrlDispatcher(AbstractRouter, collections.abc.Mapping):
         path = request.path
         method = request.method
         allowed_methods = set()
+
         for route in self._urls:
             match_dict = route.match(path)
             if match_dict is None:
                 continue
+
             route_method = route.method
-            if route_method != method:
-                allowed_methods.add(route_method)
-            else:
+            if route_method == method or route_method == hdrs.METH_ANY:
                 return UrlMappingMatchInfo(match_dict, route)
+
+            allowed_methods.add(route_method)
         else:
             if allowed_methods:
                 return _MethodNotAllowedMatchInfo(method, allowed_methods)
@@ -311,8 +327,10 @@ class UrlDispatcher(AbstractRouter, collections.abc.Mapping):
                   *, name=None, expect_handler=None):
 
         assert callable(handler), handler
-        if not asyncio.iscoroutinefunction(handler):
+        if (not asyncio.iscoroutinefunction(handler) and
+                not inspect.isgeneratorfunction(handler)):
             handler = asyncio.coroutine(handler)
+
         method = method.upper()
         assert method in self.METHODS, method
 

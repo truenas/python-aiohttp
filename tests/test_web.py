@@ -28,7 +28,7 @@ class TestWeb(unittest.TestCase):
                                     CIMultiDict(), False, False)
         payload = mock.Mock()
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(AssertionError):
             self.loop.run_until_complete(h.handle_request(message, payload))
 
     def test_app_ctor(self):
@@ -104,6 +104,20 @@ class TestRequestHandlerFactory(unittest.TestCase):
     def tearDown(self):
         self.loop.close()
 
+    def test_repr(self):
+        app = web.Application(loop=self.loop)
+        manager = app.make_handler()
+        handler = manager()
+
+        self.assertEqual(
+            '<RequestHandler none:none disconnected>', repr(handler))
+
+        handler.transport = object()
+        handler._meth = 'GET'
+        handler._path = '/index.html'
+        self.assertEqual(
+            '<RequestHandler GET:/index.html connected>', repr(handler))
+
     def test_connections(self):
         app = web.Application(loop=self.loop)
         manager = app.make_handler()
@@ -129,7 +143,7 @@ class TestRequestHandlerFactory(unittest.TestCase):
 
         manager.connection_lost(handler, None)
         self.assertEqual(manager.connections, [])
-        handler.closing.assert_called_with()
+        handler.closing.assert_called_with(timeout=None)
         transport.close.assert_called_with()
 
     def test_finish_connection_timeout(self):
@@ -144,5 +158,5 @@ class TestRequestHandlerFactory(unittest.TestCase):
 
         manager.connection_lost(handler, None)
         self.assertEqual(manager.connections, [])
-        handler.closing.assert_called_with()
+        handler.closing.assert_called_with(timeout=0.09)
         transport.close.assert_called_with()

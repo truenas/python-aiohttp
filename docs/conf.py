@@ -55,7 +55,12 @@ extensions = [
     'alabaster',
 ]
 
-intersphinx_mapping = {'python': ('http://docs.python.org/3', None)}
+intersphinx_mapping = {
+    'python': ('http://docs.python.org/3', None),
+    'aiohttp_jinja2':
+        ('http://aiohttp-jinja2.readthedocs.org/en/stable/', None),
+    'aiohttp_session':
+        ('http://aiohttp-session.readthedocs.org/en/stable/', None)}
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']

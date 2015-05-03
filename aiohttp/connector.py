@@ -6,7 +6,9 @@ import time
 import ssl
 import socket
 import weakref
+import warnings
 
+from . import hdrs
 from .client import ClientRequest
 from .errors import ServerDisconnectedError
 from .errors import HttpProxyError, ProxyConnectionError
@@ -49,17 +51,12 @@ class Connection(object):
             self._transport = None
             self._wr = None
 
-    def share_cookies(self, cookies):
-        if self._connector._share_cookies:  # XXX
-            self._connector.update_cookies(cookies)
-
 
 class BaseConnector(object):
     """Base connector class.
 
     :param conn_timeout: (optional) Connect timeout.
     :param keepalive_timeout: (optional) Keep-alive timeout.
-    :param bool share_cookies: Set to True to keep cookies between requests.
     :param bool force_close: Set to True to force close and do reconnect
         after each request (and between redirects).
     :param loop: Optional event loop.
@@ -70,6 +67,10 @@ class BaseConnector(object):
         self._conns = {}
         self._conn_timeout = conn_timeout
         self._keepalive_timeout = keepalive_timeout
+        if share_cookies:
+            warnings.warn(
+                'Using `share_cookies` is deprecated. '
+                'Use Session object instead', DeprecationWarning)
         self._share_cookies = share_cookies
         self._cleanup_handle = None
         self._force_close = force_close
@@ -150,9 +151,6 @@ class BaseConnector(object):
     def connect(self, req):
         """Get from pool or create new connection."""
         key = (req.host, req.port, req.ssl)
-
-        if self._share_cookies:
-            req.update_cookies(self.cookies.items())
 
         transport, proto = self._get(key)
         if transport is None:
@@ -391,8 +389,8 @@ class ProxyConnector(TCPConnector):
     @asyncio.coroutine
     def _create_connection(self, req, **kwargs):
         proxy_req = ClientRequest(
-            'GET', self._proxy,
-            headers={'Host': req.host},
+            hdrs.METH_GET, self._proxy,
+            headers={hdrs.HOST: req.host},
             auth=self._proxy_auth,
             loop=self._loop)
         try:
@@ -404,10 +402,10 @@ class ProxyConnector(TCPConnector):
             req.path = '{scheme}://{host}{path}'.format(scheme=req.scheme,
                                                         host=req.netloc,
                                                         path=req.path)
-        if 'AUTHORIZATION' in proxy_req.headers:
-            auth = proxy_req.headers['AUTHORIZATION']
-            del proxy_req.headers['AUTHORIZATION']
-            req.headers['PROXY-AUTHORIZATION'] = auth
+        if hdrs.AUTHORIZATION in proxy_req.headers:
+            auth = proxy_req.headers[hdrs.AUTHORIZATION]
+            del proxy_req.headers[hdrs.AUTHORIZATION]
+            req.headers[hdrs.PROXY_AUTHORIZATION] = auth
 
         if req.ssl:
             # For HTTPS requests over HTTP proxy
@@ -419,7 +417,7 @@ class ProxyConnector(TCPConnector):
             # next we must do TLS handshake and so on
             # to do this we must wrap raw socket into secure one
             # asyncio handles this perfectly
-            proxy_req.method = 'CONNECT'
+            proxy_req.method = hdrs.METH_CONNECT
             proxy_req.path = '{}:{}'.format(req.host, req.port)
             key = (req.host, req.port, req.ssl)
             conn = Connection(self, key, proxy_req,

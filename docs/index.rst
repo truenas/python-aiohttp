@@ -9,6 +9,7 @@ aiohttp
 HTTP client/server for :term:`asyncio` (:pep:`3156`).
 
 .. _GitHub: https://github.com/KeepSafe/aiohttp
+.. _Freenode: http://freenode.net
 
 
 Features
@@ -24,16 +25,6 @@ Library Installation
 ::
 
    pip install aiohttp
-
-For smart detection of *Content-Type* by the client API you would need to
-install `chardet` also::
-
-   pip install chardet
-
-*Optional*: To improve performance, you can install `Cython`
-**before** `aiohttp`::
-
-   pip install cython
 
 Getting Started
 ---------------
@@ -96,12 +87,17 @@ or have some suggestion in order to improve the library.
 The library uses `Travis <https://travis-ci.org/KeepSafe/aiohttp>`_ for
 Continuous Integration.
 
+IRC channel
+-----------
+
+You can discuss the library on Freenode_ at **#aio-libs** channel.
+
 
 Dependencies
 ------------
 
 - Python 3.3 and :term:`asyncio` or Python 3.4+
-- optional *chardet* library
+- *chardet* library
 
 Contributing
 ------------
