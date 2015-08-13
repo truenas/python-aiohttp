@@ -1,4 +1,4 @@
-python-aiohttp (0.17.2-1) UNRELEASED; urgency=medium
+python-aiohttp (0.17.2-1) unstable; urgency=medium
 
   * Team upload.
   * New upstream release.
@@ -6,7 +6,7 @@ python-aiohttp (0.17.2-1) UNRELEASED; urgency=medium
   * d/control: Add python3-gunicorn to Build-Depends.
   * d/rules: override_dh_auto_test until pybuild bug #749506 is fixed.
 
- -- Barry Warsaw <barry@debian.org>  Thu, 13 Aug 2015 13:09:40 -0400
+ -- Barry Warsaw <barry@debian.org>  Thu, 13 Aug 2015 16:12:29 -0400
 
 python-aiohttp (0.15.3-1) unstable; urgency=medium
 
