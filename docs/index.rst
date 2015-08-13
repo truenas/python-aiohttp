@@ -15,8 +15,9 @@ HTTP client/server for :term:`asyncio` (:pep:`3156`).
 Features
 --------
 
-- Supports both :ref:`aiohttp-client` and :ref:`aiohttp-web`.
-- Supports :ref:`aiohttp-web-websockets` out-of-the-box.
+- Supports both :ref:`aiohttp-client` and :ref:`HTTP Server <aiohttp-web>`.
+- Supports both :ref:`Server WebSockets <aiohttp-web-websockets>` and
+  :ref:`Client WebSockets <aiohttp-client-websockets>` out-of-the-box.
 - Web-server has :ref:`aiohttp-web-middlewares` and pluggable routing.
 
 Library Installation
@@ -24,7 +25,12 @@ Library Installation
 
 ::
 
-   pip install aiohttp
+   $ pip install aiohttp
+
+You may want to install *optional* :term:`cchardet` library as faster
+replacement for :term:`chardet`::
+
+   $ pip install cchardet
 
 Getting Started
 ---------------
@@ -87,17 +93,19 @@ or have some suggestion in order to improve the library.
 The library uses `Travis <https://travis-ci.org/KeepSafe/aiohttp>`_ for
 Continuous Integration.
 
-IRC channel
------------
-
-You can discuss the library on Freenode_ at **#aio-libs** channel.
-
 
 Dependencies
 ------------
 
 - Python 3.3 and :term:`asyncio` or Python 3.4+
 - *chardet* library
+- *Optional* :term:`cchardet` library as faster replacement for
+  :term:`chardet`.
+
+  Install it manually via::
+
+     $ pip install cchardet
+
 
 Contributing
 ------------
@@ -109,7 +117,7 @@ before making a Pull Request.
 Authors and License
 -------------------
 
-The ``aiohttp`` package is written mainly by Nikolay Kim and Andrew Svetlov.
+The ``aiohttp`` package is written mostly by Nikolay Kim and Andrew Svetlov.
 
 It's *Apache 2* licensed and freely available.
 
@@ -118,9 +126,9 @@ Feel free to improve this package and send a pull request to GitHub_.
 Contents:
 
 .. toctree::
-   :maxdepth: 2
 
    client
+   client_reference
    client_websockets
    web
    web_reference
@@ -139,3 +147,6 @@ Indices and tables
 * :ref:`genindex`
 * :ref:`modindex`
 * :ref:`search`
+
+
+.. disqus::

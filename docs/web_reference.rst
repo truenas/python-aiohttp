@@ -29,9 +29,20 @@ first positional parameter.
 
 .. class:: Request
 
+   .. attribute:: scheme
+
+      A string representing the scheme of the request.
+
+      The scheme is ``'https'`` if transport for request handling is
+      *SSL* or ``secure_proxy_ssl_header`` is matching.
+
+      ``'http'`` otherwise.
+
+      Read-only :class:`str` property.
+
    .. attribute:: method
 
-      *HTTP method*, Read-only property.
+      *HTTP method*, read-only property.
 
       The value is upper-cased :class:`str` like ``"GET"``,
       ``"POST"``, ``"PUT"`` etc.
@@ -57,7 +68,19 @@ first positional parameter.
    .. attribute:: path
 
       The URL including *PATH INFO* without the host or scheme. e.g.,
-      ``/app/blog``
+      ``/app/blog``. The path is URL-unquoted. For raw path info see
+      :attr:`raw_path`.
+
+      Read-only :class:`str` property.
+
+   .. attribute:: raw_path
+
+      The URL including raw *PATH INFO* without the host or scheme.
+      Warning, the path may be quoted and may contains non valid URL
+      characters, e.g.
+      ``/my%2Fpath%7Cwith%21some%25strange%24characters``.
+
+      For unquoted version please take a look on :attr:`path`.
 
       Read-only :class:`str` property.
 
@@ -73,6 +96,9 @@ first positional parameter.
 
       Read-only :class:`~aiohttp.multidict.MultiDictProxy` lazy property.
 
+      .. versionchanged:: 0.17
+         A multidict contains empty items for query string like ``?arg=``.
+
    .. attribute:: POST
 
       A multidict with all the variables in the POST parameters.
@@ -85,10 +111,9 @@ first positional parameter.
 
    .. attribute:: headers
 
-      A case-insensitive multidict with all headers.
+      A case-insensitive multidict proxy with all headers.
 
-      Read-only :class:`~aiohttp.multidict.CIMultiDictProxy`
-      lazy property.
+      Read-only :class:`~aiohttp.multidict.CIMultiDictProxy` property.
 
    .. attribute:: keep_alive
 
@@ -140,6 +165,14 @@ first positional parameter.
 
       .. versionadded:: 0.15
 
+   .. attribute:: has_body
+
+      Return ``True`` if request has *HTTP BODY*, ``False`` otherwise.
+
+      Read-only :class:`bool` property.
+
+      .. versionadded:: 0.16
+
    .. attribute:: payload
 
       A :class:`~aiohttp.streams.FlowControlStreamReader` instance,
@@ -180,32 +213,37 @@ first positional parameter.
 
       Returns :class:`int` or ``None`` if *Content-Length* is absent.
 
-   .. method:: read()
+   .. attribute:: if_modified_since
+
+      Read-only property that returns the date specified in the
+      *If-Modified-Since* header.
+
+      Returns :class:`datetime.datetime` or ``None`` if
+      *If-Modified-Since* header is absent or is not a valid
+      HTTP date.
+
+   .. coroutinemethod:: read()
 
       Read request body, returns :class:`bytes` object with body content.
-
-      The method is a :ref:`coroutine <coroutine>`.
 
       .. note::
 
          The method **does** store read data internally, subsequent
          :meth:`~Request.read` call will return the same value.
 
-   .. method:: text()
+   .. coroutinemethod:: text()
 
       Read request body, decode it using :attr:`charset` encoding or
       ``UTF-8`` if no encoding was specified in *MIME-type*.
 
       Returns :class:`str` with body content.
 
-      The method is a :ref:`coroutine <coroutine>`.
-
       .. note::
 
          The method **does** store read data internally, subsequent
          :meth:`~Request.text` call will return the same value.
 
-   .. method:: json(*, loader=json.loads)
+   .. coroutinemethod:: json(*, loader=json.loads)
 
       Read request body decoded as *json*.
 
@@ -227,7 +265,7 @@ first positional parameter.
          The method **does** store read data internally, subsequent
          :meth:`~Request.json` call will return the same value.
 
-   .. method:: post()
+   .. coroutinemethod:: post()
 
       A :ref:`coroutine <coroutine>` that reads POST parameters from
       request body.
@@ -245,13 +283,11 @@ first positional parameter.
          The method **does** store read data internally, subsequent
          :meth:`~Request.post` call will return the same value.
 
-   .. method:: release()
+   .. coroutinemethod:: release()
 
       Release request.
 
       Eat unread part of HTTP BODY if present.
-
-      The method is a :ref:`coroutine <coroutine>`.
 
       .. note::
 
@@ -361,14 +397,15 @@ StreamResponse
 
       .. seealso:: :meth:`enable_compression`
 
-   .. method:: enable_compression(force=False)
+   .. method:: enable_compression(force=None)
 
       Enable compression.
 
-      When *force* is ``False`` (default) compression is used only
-      when *deflate* is in *Accept-Encoding* request's header.
+      When *force* is unset compression encoding is selected based on
+      the request's *Accept-Encoding* header.
 
-      *Accept-Encoding* is not checked if *force* is ``True``.
+      *Accept-Encoding* is not checked if *force* is set to a
+      :class:`ContentCoding`.
 
       .. versionadded:: 0.14
 
@@ -491,6 +528,15 @@ StreamResponse
 
       The value converted to lower-case on attribute assigning.
 
+   .. attribute:: last_modified
+
+      *Last-Modified* header for outgoing response.
+
+      This property accepts raw :class:`str` values,
+      :class:`datetime.datetime` objects, Unix timestamps specified
+      as an :class:`int` or a :class:`float` object, and the
+      value ``None`` to unset the header.
+
    .. method:: start(request)
 
       :param aiohttp.web.Request request: HTTP request object, that the
@@ -512,7 +558,7 @@ StreamResponse
 
       Raises :exc:`RuntimeError` if :meth:`write_eof` has been called.
 
-   .. method:: drain()
+   .. coroutinemethod:: drain()
 
       A :ref:`coroutine<coroutine>` to let the write buffer of the
       underlying transport a chance to be flushed.
@@ -530,7 +576,7 @@ StreamResponse
 
       .. versionadded:: 0.14
 
-   .. method:: write_eof()
+   .. coroutinemethod:: write_eof()
 
       A :ref:`coroutine<coroutine>` *may* be called as a mark of the
       *HTTP response* processing finish.
@@ -595,7 +641,8 @@ Response
 WebSocketResponse
 ^^^^^^^^^^^^^^^^^
 
-.. class:: WebSocketResponse(*, timeout=10.0, autoclose=True, autoping=True, protocols=())
+.. class:: WebSocketResponse(*, timeout=10.0, autoclose=True, \
+                             autoping=True, protocols=())
 
    Class for handling server-side websockets.
 
@@ -630,7 +677,7 @@ WebSocketResponse
                sequence from :class:`WebSocketResponse` ctor). *protocol* may be
                ``None`` if client and server subprotocols are nit overlapping.
 
-      .. note:: The method newer raises exception.
+      .. note:: The method never raises exception.
 
    .. attribute:: closed
 
@@ -652,8 +699,8 @@ WebSocketResponse
 
    .. method:: exception()
 
-      Returns last occured exception or None.
-      
+      Returns last occurred exception or None.
+
    .. method:: ping(message=b'')
 
       Send :const:`~aiohttp.websocket.MSG_PING` to peer.
@@ -695,9 +742,9 @@ WebSocketResponse
       :raise TypeError: if data is not :class:`bytes`,
                         :class:`bytearray` or :class:`memoryview`.
 
-   .. method:: close(*, code=1000, message=b'')
+   .. coroutinemethod:: close(*, code=1000, message=b'')
 
-      A :ref:`coroutine<coroutine>` that initiates closing 
+      A :ref:`coroutine<coroutine>` that initiates closing
       handshake by sending :const:`~aiohttp.websocket.MSG_CLOSE` message.
 
       :param int code: closing code
@@ -708,7 +755,7 @@ WebSocketResponse
 
       :raise RuntimeError: if connection is not started or closing
 
-   .. method:: receive()
+   .. coroutinemethod:: receive()
 
       A :ref:`coroutine<coroutine>` that waits upcoming *data*
       message from peer and returns it.
@@ -731,7 +778,7 @@ WebSocketResponse
 
       :raise: :exc:`~aiohttp.errors.WSClientDisconnectedError` on closing.
 
-   .. method:: receive_str()
+   .. coroutinemethod:: receive_str()
 
       A :ref:`coroutine<coroutine>` that calls :meth:`receive_mgs` but
       also asserts the message type is
@@ -741,7 +788,7 @@ WebSocketResponse
 
       :raise TypeError: if message is :const:`~aiohttp.websocket.MSG_BINARY`.
 
-   .. method:: receive_bytes()
+   .. coroutinemethod:: receive_bytes()
 
       A :ref:`coroutine<coroutine>` that calls :meth:`receive_mgs` but
       also asserts the message type is
@@ -769,8 +816,9 @@ Application is a synonym for web-server.
 
 To get fully working example, you have to make *application*, register
 supported urls in *router* and create a *server socket* with
-:class:`aiohttp.RequestHandlerFactory` as a *protocol factory*. *RequestHandlerFactory*
-could be constructed with :meth:`make_handler`.
+:class:`aiohttp.RequestHandlerFactory` as a *protocol
+factory*. *RequestHandlerFactory* could be constructed with
+:meth:`make_handler`.
 
 *Application* contains a *router* instance and a list of callbacks that
 will be called during application finishing.
@@ -808,7 +856,7 @@ arbitrary properties for later access from
 
                   By default the value is ``logging.getLogger("aiohttp.web")``
 
-   :param middlewares: sequence of middleware factories, see
+   :param middlewares: :class:`list` of middleware factories, see
                        :ref:`aiohttp-web-middlewares` for details.
 
                        .. versionadded:: 0.13
@@ -845,7 +893,7 @@ arbitrary properties for later access from
          yield from loop.create_server(app.make_handler(),
                                        '0.0.0.0', 8080)
 
-   .. method:: finish()
+   .. coroutinemethod:: finish()
 
       A :ref:`coroutine<coroutine>` that should be called after
       server stopping.
@@ -873,7 +921,7 @@ arbitrary properties for later access from
    .. note::
 
       Application object has :attr:`route` attribute but has no
-      ``add_router`` method. The reason is: we want to support
+      ``add_route()`` method. The reason is: we want to support
       different route implementations (even maybe not url-matching
       based but traversal ones).
 
@@ -895,7 +943,7 @@ can handle http connections.
 
    .. attribute:: connections
 
-      List of all currently oppened connections.
+      List of all currently opened connections.
 
    .. method:: finish_connections(timeout)
 
@@ -955,9 +1003,9 @@ Router is any object that implements :class:`AbstractRouter` interface.
                          The parameter is case-insensitive, e.g. you
                          can push ``'get'`` as well as ``'GET'``.
 
-      :param str path: route path
+      :param str path: route path. Should be started with slash (``'/'``).
 
-      :param callable handler: route handler
+      :param callable handler: route handler.
 
       :param str name: optional route name.
 
@@ -965,7 +1013,8 @@ Router is any object that implements :class:`AbstractRouter` interface.
 
       :returns: new :class:`PlainRoute` or :class:`DynamicRoute` instance.
 
-   .. method:: add_static(prefix, path, *, name=None, expect_handler=None)
+   .. method:: add_static(prefix, path, *, name=None, expect_handler=None, \
+                          chunk_size=256*1024, response_factory=None)
 
       Adds router for returning static files.
 
@@ -986,24 +1035,45 @@ Router is any object that implements :class:`AbstractRouter` interface.
 
       :param coroutine expect_handler: optional *expect* header handler.
 
+      :param int chunk_size: size of single chunk for file
+                             downloading, 64Kb by default.
+
+                             Increasing *chunk_size* parameter to,
+                             say, 1Mb may increase file downloading
+                             speed but consumes more memory.
+
+                             .. versionadded:: 0.16
+
+      :param callable response_factory: factory to use to generate a new
+                                        response, defaults to
+                                        :class:`StreamResponse` and should
+                                        expose a compatible API.
+
+                                        .. versionadded:: 0.17
+
    :returns: new :class:`StaticRoute` instance.
 
-   .. method:: resolve(requst)
+   .. coroutinemethod:: resolve(requst)
 
       A :ref:`coroutine<coroutine>` that returns
       :class:`AbstractMatchInfo` for *request*.
 
       The method never raises exception, but returns
-      :class:`AbstractMatchInfo` instance with ``None``
-      :attr:`~AbstractMatchInfo.route` and
-      :attr:`~AbstractMatchInfo.handler` which raises
-      :exc:`HTTPNotFound` or :exc:`HTTPMethodNotAllowed` on handler's
-      execution if there is no registered route for *request*.
+      :class:`AbstractMatchInfo` instance with:
 
-      *Middlewares* can process that exceptions to render
-      pretty-looking error page for example.
+      1. :attr:`~AbstractMatchInfo.route` assigned to
+         :class:`SystemRoute` instance
+      2. :attr:`~AbstractMatchInfo.handler` which raises
+         :exc:`HTTPNotFound` or :exc:`HTTPMethodNotAllowed` on handler's
+         execution if there is no registered route for *request*.
+
+         *Middlewares* can process that exceptions to render
+         pretty-looking error page for example.
 
       Used by internal machinery, end user unlikely need to call the method.
+
+      .. note:: The method uses :attr:`Request.raw_path` for pattern
+         matching against registered routes.
 
       .. versionchanged:: 0.14
 
@@ -1112,6 +1182,19 @@ urls with :ref:`variable pathes<aiohttp-web-variable-handler>` spec.
       >>> route.url(filename='img/logo.png', query={'param': 1})
       '/path/to/static/img/logo.png?param=1'
 
+
+.. class:: SystemRoute
+
+   The route class for internal purposes.
+
+   Now it has used for handling *404: Not Found* and *405: Method Not Allowed*.
+
+   .. method:: url()
+
+   Always raises :exc:`RuntimeError`, :class:`SystemRoute` should not
+   be used in url construction expressions.
+
+
 MatchInfo
 ^^^^^^^^^
 
@@ -1160,3 +1243,19 @@ Utilities
       *MIME type* of uploaded file, ``'text/plain'`` by default.
 
    .. seealso:: :ref:`aiohttp-web-file-upload`
+
+
+Constants
+---------
+
+.. class:: ContentCoding
+
+   An :class:`enum.Enum` class of available Content Codings.
+
+   .. attribute:: deflate
+
+   .. attribute:: gzip
+
+   .. attribute:: identity
+
+.. disqus::

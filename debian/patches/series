@@ -2,4 +2,3 @@
 # python3-gunicorn (which doesn't exist in the archive), so this patch just
 # removes that test dep (and the test itself will automatically be skipped in
 # the absense of the import)
-no-gunicorn.patch

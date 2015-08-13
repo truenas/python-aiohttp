@@ -17,7 +17,7 @@ from aiohttp.multidict import MultiDict
 from aiohttp.multipart import MultipartWriter
 
 
-class HttpClientFunctionalTests(unittest.TestCase):
+class TestHttpClientFunctional(unittest.TestCase):
 
     def setUp(self):
         self.loop = asyncio.new_event_loop()
@@ -145,6 +145,22 @@ class HttpClientFunctionalTests(unittest.TestCase):
             r = self.loop.run_until_complete(
                 client.request('post', httpd.url('redirect', 2),
                                data={'some': 'data'}, loop=self.loop))
+            content = self.loop.run_until_complete(r.content.read())
+            content = content.decode()
+
+            self.assertEqual(r.status, 200)
+            self.assertIn('"method": "GET"', content)
+            self.assertEqual(2, httpd['redirects'])
+            r.close()
+
+    def test_HTTP_302_REDIRECT_POST_with_content_length_header(self):
+        data = json.dumps({'some': 'data'})
+        with test_utils.run_server(self.loop, router=Functional) as httpd:
+            r = self.loop.run_until_complete(
+                client.request('post', httpd.url('redirect', 2),
+                               data=data,
+                               headers={'Content-Length': str(len(data))},
+                               loop=self.loop))
             content = self.loop.run_until_complete(r.content.read())
             content = content.decode()
 
@@ -787,6 +803,7 @@ class HttpClientFunctionalTests(unittest.TestCase):
                 client.request('get', httpd.url('encoding', 'deflate'),
                                loop=self.loop))
             self.assertEqual(r.status, 200)
+            r.close()
 
             r = self.loop.run_until_complete(
                 client.request('get', httpd.url('encoding', 'gzip'),
@@ -809,7 +826,7 @@ class HttpClientFunctionalTests(unittest.TestCase):
             self.assertIn(b'"Cookie": "test1=123; test3=456"', bytes(content))
             r.close()
 
-    @mock.patch('aiohttp.client.client_logger')
+    @mock.patch('aiohttp.client_reqrep.client_logger')
     def test_set_cookies(self, m_log):
         with test_utils.run_server(self.loop, router=Functional) as httpd:
             resp = self.loop.run_until_complete(
@@ -826,7 +843,8 @@ class HttpClientFunctionalTests(unittest.TestCase):
 
     def test_share_cookies(self):
         with test_utils.run_server(self.loop, router=Functional) as httpd:
-            conn = aiohttp.TCPConnector(share_cookies=True, loop=self.loop)
+            with self.assertWarns(DeprecationWarning):
+                conn = aiohttp.TCPConnector(share_cookies=True, loop=self.loop)
             resp = self.loop.run_until_complete(
                 client.request('get', httpd.url('cookies'),
                                connector=conn, loop=self.loop))
@@ -834,6 +852,7 @@ class HttpClientFunctionalTests(unittest.TestCase):
             self.assertEqual(resp.cookies['c1'].value, 'cookie1')
             self.assertEqual(resp.cookies['c2'].value, 'cookie2')
             self.assertEqual(conn.cookies, resp.cookies)
+            resp.close()
 
             resp2 = self.loop.run_until_complete(
                 client.request('get', httpd.url('method', 'get'),
@@ -842,6 +861,7 @@ class HttpClientFunctionalTests(unittest.TestCase):
             data = self.loop.run_until_complete(resp2.json())
             self.assertEqual(data['headers']['Cookie'],
                              'c1=cookie1; c2=cookie2')
+            resp2.close()
 
     def test_chunked(self):
         with test_utils.run_server(self.loop, router=Functional) as httpd:
@@ -880,7 +900,8 @@ class HttpClientFunctionalTests(unittest.TestCase):
 
     def test_keepalive(self):
         from aiohttp import connector
-        c = connector.TCPConnector(share_cookies=True, loop=self.loop)
+        with self.assertWarns(DeprecationWarning):
+            c = connector.TCPConnector(share_cookies=True, loop=self.loop)
 
         with test_utils.run_server(self.loop, router=Functional) as httpd:
             r = self.loop.run_until_complete(
@@ -924,10 +945,11 @@ class HttpClientFunctionalTests(unittest.TestCase):
 
         conn.close()
 
-    @mock.patch('aiohttp.client.client_logger')
+    @mock.patch('aiohttp.client_reqrep.client_logger')
     def test_connector_cookies(self, m_log):
         from aiohttp import connector
-        conn = connector.TCPConnector(share_cookies=True, loop=self.loop)
+        with self.assertWarns(DeprecationWarning):
+            conn = connector.TCPConnector(share_cookies=True, loop=self.loop)
 
         with test_utils.run_server(self.loop, router=Functional) as httpd:
             conn.update_cookies({'test': '1'})
@@ -1096,7 +1118,8 @@ class HttpClientFunctionalTests(unittest.TestCase):
 
     def test_share_cookie_partial_update(self):
         with test_utils.run_server(self.loop, router=Functional) as httpd:
-            conn = aiohttp.TCPConnector(share_cookies=True, loop=self.loop)
+            with self.assertWarns(DeprecationWarning):
+                conn = aiohttp.TCPConnector(share_cookies=True, loop=self.loop)
             # Set c1 and c2 cookie
             resp = self.loop.run_until_complete(
                 client.request('get', httpd.url('cookies'),
@@ -1104,11 +1127,15 @@ class HttpClientFunctionalTests(unittest.TestCase):
             self.assertEqual(resp.cookies['c1'].value, 'cookie1')
             self.assertEqual(resp.cookies['c2'].value, 'cookie2')
             self.assertEqual(conn.cookies, resp.cookies)
+            resp.close()
+
             # Update c1 at server side
             resp = self.loop.run_until_complete(
                 client.request('get', httpd.url('cookies_partial'),
                                connector=conn, loop=self.loop))
             self.assertEqual(resp.cookies['c1'].value, 'other_cookie1')
+            resp.close()
+
             # Assert, that we send updated cookies in next requests
             r = self.loop.run_until_complete(
                 client.request('get', httpd.url('method', 'get'),
@@ -1118,10 +1145,12 @@ class HttpClientFunctionalTests(unittest.TestCase):
             self.assertEqual(
                 content['headers']['Cookie'],
                 'c1=other_cookie1; c2=cookie2')
+            r.close()
 
     def test_connector_cookie_merge(self):
         with test_utils.run_server(self.loop, router=Functional) as httpd:
-            conn = aiohttp.TCPConnector(share_cookies=True, loop=self.loop)
+            with self.assertWarns(DeprecationWarning):
+                conn = aiohttp.TCPConnector(share_cookies=True, loop=self.loop)
             conn.update_cookies({
                 "c1": "connector_cookie1",
                 "c2": "connector_cookie2",
@@ -1136,6 +1165,7 @@ class HttpClientFunctionalTests(unittest.TestCase):
             self.assertEqual(
                 content['headers']['Cookie'],
                 'c1=direct_cookie1; c2=connector_cookie2')
+            r.close()
 
     def test_session_cookies(self):
         with test_utils.run_server(self.loop, router=Functional) as httpd:
@@ -1146,6 +1176,7 @@ class HttpClientFunctionalTests(unittest.TestCase):
             self.assertEqual(resp.cookies['c1'].value, 'cookie1')
             self.assertEqual(resp.cookies['c2'].value, 'cookie2')
             self.assertEqual(session.cookies, resp.cookies)
+            resp.close()
 
             # Assert, that we send those cookies in next requests
             r = self.loop.run_until_complete(
@@ -1154,6 +1185,8 @@ class HttpClientFunctionalTests(unittest.TestCase):
             content = self.loop.run_until_complete(r.json())
             self.assertEqual(
                 content['headers']['Cookie'], 'c1=cookie1; c2=cookie2')
+            r.close()
+            session.close()
 
     def test_session_headers(self):
         with test_utils.run_server(self.loop, router=Functional) as httpd:
@@ -1170,6 +1203,8 @@ class HttpClientFunctionalTests(unittest.TestCase):
                 "X-Real-Ip", content['headers'])
             self.assertEqual(
                 content['headers']["X-Real-Ip"], "192.168.0.1")
+            r.close()
+            session.close()
 
     def test_session_headers_merge(self):
         with test_utils.run_server(self.loop, router=Functional) as httpd:
@@ -1191,6 +1226,8 @@ class HttpClientFunctionalTests(unittest.TestCase):
                 content['headers']["X-Real-Ip"], "192.168.0.1")
             self.assertEqual(
                 content['headers']["X-Sent-By"], "aiohttp")
+            r.close()
+            session.close()
 
     def test_session_auth(self):
         with test_utils.run_server(self.loop, router=Functional) as httpd:
@@ -1205,6 +1242,8 @@ class HttpClientFunctionalTests(unittest.TestCase):
                 "Authorization", content['headers'])
             self.assertEqual(
                 content['headers']["Authorization"], "Basic bG9naW46cGFzcw==")
+            r.close()
+            session.close()
 
     def test_session_auth_override(self):
         with test_utils.run_server(self.loop, router=Functional) as httpd:
@@ -1221,6 +1260,8 @@ class HttpClientFunctionalTests(unittest.TestCase):
             self.assertEqual(
                 content['headers']["Authorization"],
                 "Basic b3RoZXJfbG9naW46cGFzcw==")
+            r.close()
+            session.close()
 
     def test_session_auth_header_conflict(self):
         with test_utils.run_server(self.loop, router=Functional) as httpd:
@@ -1232,6 +1273,26 @@ class HttpClientFunctionalTests(unittest.TestCase):
                 self.loop.run_until_complete(
                     session.request('get', httpd.url('method', 'get'),
                                     headers=headers))
+            session.close()
+
+    def test_shortcuts(self):
+        with test_utils.run_server(self.loop, router=Functional) as httpd:
+            for meth in ('get', 'post', 'put', 'delete',
+                         'head', 'patch', 'options'):
+                coro = getattr(client, meth)
+                r = self.loop.run_until_complete(
+                    coro(httpd.url('method', meth), loop=self.loop))
+                content1 = self.loop.run_until_complete(r.read())
+                content2 = self.loop.run_until_complete(r.read())
+                content = content1.decode()
+
+                self.assertEqual(r.status, 200)
+                if meth == 'head':
+                    self.assertEqual(b'', content1)
+                else:
+                    self.assertIn('"method": "%s"' % meth.upper(), content)
+                self.assertEqual(content1, content2)
+                r.close()
 
 
 class Functional(test_utils.Router):

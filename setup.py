@@ -34,13 +34,13 @@ class ve_build_ext(build_ext):
     def run(self):
         try:
             build_ext.run(self)
-        except DistutilsPlatformError:
+        except (DistutilsPlatformError, FileNotFoundError):
             raise BuildFailed()
 
     def build_extension(self, ext):
         try:
             build_ext.build_extension(self, ext)
-        except (CCompilerError, DistutilsExecError, DistutilsPlatformError):
+        except (CCompilerError, DistutilsExecError, DistutilsPlatformError, ValueError):
             raise BuildFailed()
 
 
@@ -56,7 +56,7 @@ with codecs.open(os.path.join(os.path.abspath(os.path.dirname(
 install_requires = ['chardet']
 
 if sys.version_info < (3, 4):
-    install_requires += ['asyncio']
+    install_requires += ['asyncio', 'enum34']
 
 tests_require = install_requires + ['nose', 'gunicorn']
 

@@ -7,10 +7,11 @@
 Working with Multipart
 ======================
 
-`aiohttp` supports a full featured multipart reader and writer. Both are designed
-with steaming processing in mind to avoid unwanted footprint which may be
-significant if you're dealing with large payloads, but this also means that
-most I/O operation are only possible to be executed a single time.
+`aiohttp` supports a full featured multipart reader and writer. Both
+are designed with steaming processing in mind to avoid unwanted
+footprint which may be significant if you're dealing with large
+payloads, but this also means that most I/O operation are only
+possible to be executed a single time.
 
 Reading Multipart Responses
 ---------------------------
@@ -22,7 +23,7 @@ data::
 
 First, you need to wrap the response with a
 :meth:`MultipartReader.from_response`. This needs to keep the implementation of
-:class:`MultipartReader` separated from the response and the connection routines 
+:class:`MultipartReader` separated from the response and the connection routines
 which makes it more portable::
 
     >>> reader = aiohttp.MultipartReader.from_response(resp)
@@ -30,7 +31,7 @@ which makes it more portable::
 Let's assume with this response you'd received some JSON document and multiple
 files for it, but you don't need all of them, just a specific one.
 
-So first you need to enter into a loop where the multipart body will 
+So first you need to enter into a loop where the multipart body will
 be processed::
 
     >>> metadata = None
@@ -57,17 +58,17 @@ body part headers: this allows you to filter parts by their attributes::
 
 Nor :class:`BodyPartReader` or :class:`MultipartReader` instances doesn't
 read the whole body part data without explicitly asking for.
-:class:`BodyPartReader` provides a set of helpers methods 
+:class:`BodyPartReader` provides a set of helpers methods
 to fetch popular content types in friendly way:
 
-- :meth:`BodyPartReader.text` for plaintext data;
+- :meth:`BodyPartReader.text` for plain text data;
 - :meth:`BodyPartReader.json` for JSON;
 - :meth:`BodyPartReader.form` for `application/www-urlform-encode`
 
-Each of these methods automagically recognizes if content is compressed by
+Each of these methods automatically recognizes if content is compressed by
 using `gzip` and `deflate` encoding (while it respects `identity` one), or if
 transfer encoding is base64 or `quoted-printable` - in each case the result
-will get automagically decoded. But in case you need to access to raw binary
+will get automatically decoded. But in case you need to access to raw binary
 data as it is, there are :meth:`BodyPartReader.read` and
 :meth:`BodyPartReader.read_chunk` coroutine methods as well to read raw binary
 data as it is all-in-single-shot or by chunks respectively.
@@ -81,8 +82,8 @@ from it::
     ...         continue
 
 If current body part doesn't matches your expectation and you want to skip it
-- just continue a loop to start a next iteration of it. Here is where magic 
-happens. Before fetching the next body part ``yield from reader.next()`` it 
+- just continue a loop to start a next iteration of it. Here is where magic
+happens. Before fetching the next body part ``yield from reader.next()`` it
 ensures that the previous one was read completely. If it wasn't, all its content
 sends to the void in term to fetch the next part. So you don't have to care
 about cleanup routines while you're within a loop.
@@ -97,11 +98,12 @@ to do::
 
     ...     filedata = part.decode(filedata)
 
-Once you are done wirh multipart processing, just break a loop::
+Once you are done with multipart processing, just break a loop::
 
     ...     break
 
-And release the connection to do not hang the response in the middle of the data::
+And release the connection to do not hang the response in the middle
+of the data::
 
     ...  yield from resp.release()  # or yield from reader.release()
 
@@ -111,7 +113,7 @@ Sending Multipart Requests
 
 :class:`MultipartWriter` provides an interface to build multipart payload from
 the Python data and serialize it into chunked binary stream. Since multipart
-format is recursive and supports deeply nestings, you can use ``with`` statement
+format is recursive and supports deeply nesting, you can use ``with`` statement
 to design your multipart data closer to how it will be::
 
     >>> with aiohttp.MultipartWriter('mixed') as mpwriter:
@@ -188,7 +190,7 @@ part and if body part has `Content-Encoding` or `Content-Transfer-Encoding`
 they will be applied on streaming content.
 
 Please note, that on :meth:`MultipartWriter.serialize` all the file objects
-will be read until the end and there is no way to repeat a request without 
+will be read until the end and there is no way to repeat a request without
 rewinding their pointers to the start.
 
 Hacking Multipart
@@ -216,7 +218,7 @@ size::
 
 Sometimes the server response may not be well formed: it may or may not
 contains nested parts. For instance, we request a resource which returns
-JSON documents with the files attached to it. If the document has any 
+JSON documents with the files attached to it. If the document has any
 attachments, they are returned as a nested multipart.
 If it has not it responds as plain body parts::
 
@@ -258,7 +260,7 @@ If it has not it responds as plain body parts::
     ----:--
     --:--
 
-Reading such kind of data in single stream is possible, but is not clean at 
+Reading such kind of data in single stream is possible, but is not clean at
 all::
 
     result = []
@@ -332,3 +334,6 @@ And this gives us a more cleaner solution::
 
 .. _cgi.FieldStorage: https://docs.python.org/3.4/library/cgi.html
 .. _mimetypes: https://docs.python.org/3.4/library/mimetypes.html
+
+
+.. disqus::

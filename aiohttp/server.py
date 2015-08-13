@@ -2,7 +2,6 @@
 
 import asyncio
 import http.server
-import time
 import traceback
 import socket
 
@@ -276,23 +275,25 @@ class ServerHttpProtocol(aiohttp.StreamProtocol):
                 if self.debug:
                     self.log_exception(
                         'Ignored premature client disconnection.')
-                break
+                return
             except errors.HttpProcessingError as exc:
                 if self.transport is not None:
                     yield from self.handle_error(exc.code, message,
                                                  None, exc, exc.headers)
+            except errors.LineLimitExceededParserError as exc:
+                yield from self.handle_error(400, message, None, exc)
             except Exception as exc:
                 yield from self.handle_error(500, message, None, exc)
             finally:
                 if self.transport is None:
                     self.log_debug('Ignored premature client disconnection.')
-                    break
+                    return
 
                 if payload and not payload.is_eof():
                     self.log_debug('Uncompleted request.')
                     self._request_handler = None
                     self.transport.close()
-                    break
+                    return
                 else:
                     reader.unset_parser()
 
@@ -310,10 +311,10 @@ class ServerHttpProtocol(aiohttp.StreamProtocol):
                         self.log_debug('Close client connection.')
                         self._request_handler = None
                         self.transport.close()
-                        break
+                        return
                 else:
                     # connection is closed
-                    break
+                    return
 
     def handle_error(self, status=500,
                      message=None, payload=None, exc=None, headers=None):
@@ -321,7 +322,7 @@ class ServerHttpProtocol(aiohttp.StreamProtocol):
 
         Returns http response with specific status code. Logs additional
         information. It always closes current connection."""
-        now = time.time()
+        now = self._loop.time()
         try:
             if self._request_handler is None:
                 # client has been disconnected during writing.
@@ -358,7 +359,7 @@ class ServerHttpProtocol(aiohttp.StreamProtocol):
             response.write(html)
             drain = response.write_eof()
 
-            self.log_access(message, None, response, time.time() - now)
+            self.log_access(message, None, response, self._loop.time() - now)
             return drain
         finally:
             self.keep_alive(False)
@@ -374,7 +375,7 @@ class ServerHttpProtocol(aiohttp.StreamProtocol):
         :param payload: Request payload
         :type payload: aiohttp.streams.FlowControlStreamReader
         """
-        now = time.time()
+        now = self._loop.time()
         response = aiohttp.Response(
             self.writer, 404, http_version=message.version, close=True)
 
@@ -388,6 +389,6 @@ class ServerHttpProtocol(aiohttp.StreamProtocol):
         drain = response.write_eof()
 
         self.keep_alive(False)
-        self.log_access(message, None, response, time.time() - now)
+        self.log_access(message, None, response, self._loop.time() - now)
 
         return drain

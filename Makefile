@@ -16,7 +16,10 @@ test: flake develop
 vtest: flake develop
 	nosetests -s -v $(FLAGS) ./tests/
 
-cov cover coverage: flake develop
+cov cover coverage:
+	tox
+
+cov-dev: flake develop
 	@coverage erase
 	@coverage run -m nose -s $(FLAGS) tests
 	@mv .coverage .coverage.accel
@@ -46,9 +49,13 @@ clean:
 	rm -f aiohttp/_multidict.c
 	rm -f aiohttp/_multidict.*.so
 	rm -f aiohttp/_multidict.*.pyd
+	rm -rf .tox
 
 doc:
 	make -C docs html
 	@echo "open file://`pwd`/docs/_build/html/index.html"
+
+doc-spelling:
+	make -C docs spelling
 
 .PHONY: all build venv flake test vtest testloop cov clean doc

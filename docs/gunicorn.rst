@@ -1,5 +1,5 @@
-aiohttp web application with Gunicorn
-=====================================
+aiohttp and  Gunicorn
+=====================
 
 Launching your aiohttp web application on Ubuntu Linux with Gunicorn
 
@@ -14,7 +14,7 @@ Everything was tested on Ubuntu 14.04::
 
 Ubuntu has a bug in pyenv, so to create virtualenv you need to do some
 extra manipulation::
- 
+
   >> pyvenv-3.4 --without-pip venv
   >> source venv/bin/activate
   >> curl https://bootstrap.pypa.io/get-pip.py | python
@@ -67,3 +67,6 @@ More information
 ----------------
 
 Please refer `official documentation <http://docs.gunicorn.org/en/latest/deploy.html>`_ for more information about *Gunicorn* production deployment.
+
+
+.. disqus::

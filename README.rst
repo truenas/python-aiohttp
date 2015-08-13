@@ -42,6 +42,11 @@ Source code
 The latest developer version is available in a github repository:
 https://github.com/KeepSafe/aiohttp
 
+Benchmarks
+----------
+
+If you are interested in by efficiency, AsyncIO community maintains a list of benchmarks on the official wiki:
+https://github.com/python/asyncio/wiki/Benchmarks
 
 Getting started
 ---------------
@@ -86,8 +91,6 @@ asyncio approach:
 Server
 ^^^^^^
 
-In aiohttp 0.12 we've added highlevel API for web HTTP server.
-
 This is simple usage example:
 
 .. code-block:: python
@@ -127,7 +130,8 @@ This is simple usage example:
         app.router.add_route('GET', '/echo', wshandler)
         app.router.add_route('GET', '/{name}', handle)
 
-        srv = yield from loop.create_server(app.make_handler(), '127.0.0.1', 8080)
+        srv = yield from loop.create_server(app.make_handler(),
+                                            '127.0.0.1', 8080)
         print("Server started at http://127.0.0.1:8080")
         return srv
 
