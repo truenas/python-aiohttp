@@ -14,7 +14,8 @@ Build-Depends: debhelper (>= 9),
                cython3,
 # for tests:
                python3-nose,
-               python3-chardet
+               python3-chardet,
+               python3-gunicorn
 Standards-Version: 3.9.6
 Homepage: https://aiohttp.readthedocs.org
 Vcs-Svn: svn://anonscm.debian.org/python-modules/packages/python-aiohttp/trunk/
