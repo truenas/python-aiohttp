@@ -8,7 +8,7 @@ from aiohttp import streams
 from aiohttp import test_utils
 
 
-class StreamReaderTests(unittest.TestCase):
+class TestStreamReader(unittest.TestCase):
 
     DATA = b'line1\nline2\nline3\n'
 
@@ -449,7 +449,7 @@ class StreamReaderTests(unittest.TestCase):
         self.assertRaises(RuntimeError, stream.read_nowait)
 
 
-class EmptyStreamReaderTests(unittest.TestCase):
+class TestEmptyStreamReader(unittest.TestCase):
 
     def setUp(self):
         self.loop = asyncio.new_event_loop()
@@ -479,15 +479,7 @@ class EmptyStreamReaderTests(unittest.TestCase):
         self.assertIs(s.read_nowait(), streams.EOF_MARKER)
 
 
-class DataQueueTests(unittest.TestCase):
-
-    def setUp(self):
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(None)
-        self.buffer = streams.DataQueue(loop=self.loop)
-
-    def tearDown(self):
-        self.loop.close()
+class DataQueueMixin:
 
     def test_is_eof(self):
         self.assertFalse(self.buffer.is_eof())
@@ -534,13 +526,15 @@ class DataQueueTests(unittest.TestCase):
     def test_read_cancelled(self):
         read_task = asyncio.Task(self.buffer.read(), loop=self.loop)
         test_utils.run_briefly(self.loop)
-        self.assertIsInstance(self.buffer._waiter, asyncio.Future)
+        waiter = self.buffer._waiter
+        self.assertIsInstance(waiter, asyncio.Future)
 
         read_task.cancel()
         self.assertRaises(
             asyncio.CancelledError,
             self.loop.run_until_complete, read_task)
-        self.assertTrue(self.buffer._waiter.cancelled())
+        self.assertTrue(waiter.cancelled())
+        self.assertIsNone(self.buffer._waiter)
 
         self.buffer.feed_data(b'test', 4)
         self.assertIsNone(self.buffer._waiter)
@@ -603,11 +597,26 @@ class DataQueueTests(unittest.TestCase):
         self.assertRaises(ValueError, t1.result)
 
 
-class ChunksQueueTests(DataQueueTests):
+class TestDataQueue(unittest.TestCase, DataQueueMixin):
 
     def setUp(self):
-        super().setUp()
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(None)
+        self.buffer = streams.DataQueue(loop=self.loop)
+
+    def tearDown(self):
+        self.loop.close()
+
+
+class TestChunksQueue(unittest.TestCase, DataQueueMixin):
+
+    def setUp(self):
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(None)
         self.buffer = streams.ChunksQueue(loop=self.loop)
+
+    def tearDown(self):
+        self.loop.close()
 
     def test_read_eof(self):
         read_task = asyncio.Task(self.buffer.read(), loop=self.loop)

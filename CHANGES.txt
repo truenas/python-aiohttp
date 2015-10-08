@@ -1,73 +1,69 @@
 CHANGES
 =======
 
-0.15.3 (04-22-2015)
--------------------
+0.17.2 (08-11-2015)
+---------------------
 
-- Fix graceful shutdown handling
+- Don't forget to pass `data` argument forward #462
 
-- Fix `Expect` header handling for not found and not allowed routes #340
+- Fix multipart read bytes count #463
 
+0.17.1 (08-10-2015)
+---------------------
 
-0.15.2 (04-19-2015)
--------------------
+- Fix multidict comparsion to arbitrary abc.Mapping
 
-- Flow control subsystem refactoring
+0.17.0 (08-04-2015)
+---------------------
 
-- Http server performace optimizations
+- Make StaticRoute support Last-Modified and If-Modified-Since headers #386
 
-- Allow to match any request method with `*`
+- Add Request.if_modified_since and Stream.Response.last_modified properties
 
-- Explicitly call drain on transport #316
+- Fix deflate compression when writing a chunked response #395
 
-- Make chardet module dependency mandatory #318
+- Request`s content-length header is cleared now after redirect from
+  POST method #391
 
-- Support keep-alive for HTTP 1.0 #325
+- Return a 400 if server received a non HTTP content #405
 
-- Do not chunk single file during upload #327
+- Fix keep-alive support for aiohttp clients #406
 
-- Add ClientSession object for cookie storage and default headers #328
+- Allow gzip compression in high-level server response interface #403
 
-- Add `keep_alive_on` argument for http server handler.
+- Rename TCPConnector.resolve and family to dns_cache #415
 
+- Make UrlDispatcher ignore quoted characters during url matching #414
+  Backward-compatibility warning: this may change the url matched by
+  your queries if they send quoted character (like %2F for /) #414
 
-0.15.1 (03-31-2015)
--------------------
+- Use optional cchardet accelerator if present #418
 
-- Pass Autobahn Testsuit tests
+- Borrow loop from Connector in ClientSession if loop is not set
 
-- Fixed websocket fragmentation
+- Add context manager support to ClientSession for session closing.
 
-- Fixed websocket close procedure
+- Add toplevel get(), post(), put(), head(), delete(), options(),
+  patch() coroutines.
 
-- Fixed parser buffer limits
+- Fix IPv6 support for client API #425
 
-- Added `timeout` parameter to WebSocketResponse ctor
+- Pass SSL context through proxy connector #421
 
-- Added `WebSocketResponse.close_code` attribute
+- Make the rule: path for add_route should start with slash
 
+- Don't process request finishing by low-level server on closed event loop
 
-0.15.0 (03-27-2015)
--------------------
+- Don't override data if multiple files are uploaded with same key #433
 
-- Client WebSockets support
+- Ensure multipart.BodyPartReader.read_chunk read all the necessary data
+  to avoid false assertions about malformed multipart payload
 
-- New Multipart system #273
+- Dont sent body for  204, 205 and 304 http exceptions #442
 
-- Support for "Except" header #287 #267
+- Correctly skip Cython compilation in MSVC not found #453
 
-- Set default Content-Type for post requests #184
+- Add response factory to StaticRoute #456
 
-- Fix issue with construction dynamic route with regexps and trailing slash #266
+- Don't append trailing CRLF for multipart.BodyPartReader #454
 
-- Add repr to web.Request
-
-- Add repr to web.Response
-
-- Add repr for NotFound and NotAllowed match infos
-
-- Add repr for web.Application
-
-- Add repr to UrlMappingMatchInfo #217
-
-- Gunicorn 19.2.x compatibility

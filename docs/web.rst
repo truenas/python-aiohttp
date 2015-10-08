@@ -38,13 +38,20 @@ method*, *path* and *handler*::
 After that, create a server and run the *asyncio loop* as usual::
 
    loop = asyncio.get_event_loop()
-   f = loop.create_server(app.make_handler(), '0.0.0.0', 8080)
+   handler = app.make_handler()
+   f = loop.create_server(handler, '0.0.0.0', 8080)
    srv = loop.run_until_complete(f)
    print('serving on', srv.sockets[0].getsockname())
    try:
        loop.run_forever()
    except KeyboardInterrupt:
        pass
+   finally:
+       loop.run_until_complete(handler.finish_connections(1.0))
+       srv.close()
+       loop.run_until_complete(srv.wait_closed())
+       loop.run_until_complete(app.finish())
+   loop.close()
 
 That's it.
 
@@ -66,6 +73,9 @@ Handlers are connected to the :class:`Application` via routes::
    app.router.add_route('GET', '/', handler)
 
 .. _aiohttp-web-variable-handler:
+
+Variable routes
+^^^^^^^^^^^^^^^
 
 You can also use *variable routes*. If route contains strings like
 ``'/a/{name}/c'`` that means the route matches to the path like
@@ -94,6 +104,38 @@ By default regex is ``[^{}/]+``.
 
    Support for custom regexs in variable routes.
 
+
+.. _aiohttp-web-named-routes:
+
+Named routes and url reverse constructing
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Routes may have a *name*::
+
+   app.router.add_route('GET', '/root', handler, name='root')
+
+In web-handler you may build *URL* for that route::
+
+   >>> request.app.router['root'].url(query="?a=b&c=d")
+   '/root?a=b&c=d'
+
+More interesting example is building *URL* for :ref:`variable
+router<aiohttp-web-variable-handler>`::
+
+   app.router.add_route('GET', r'/{user}/info',
+                        variable_handler, name='handler')
+
+
+In this case you can pass route parts also::
+
+   >>> request.app.router['handler'].url(
+   ...     parts={'user': 'john_doe'},
+   ...     query="?a=b")
+   '/john_doe/info?a=b'
+
+
+Using plain coroutines and classes for web-handlers
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Handlers *may* be first-class functions, e.g.::
 
@@ -203,12 +245,16 @@ Before template rendering you have to setup *jinja2 environment* first
 
 
 After that you may use template engine in your *web-handlers*. The
-most convinient way is to use :func:`aiohttp_jinja2.template`
+most convenient way is to use :func:`aiohttp_jinja2.template`
 decorator::
 
     @aiohttp_jinja2.template('tmpl.jinja2')
     def handler(request):
         return {'name': 'Andrew', 'surname': 'Svetlov'}
+
+If you prefer `Mako template engine <http://www.makotemplates.org/>`_
+please take a look on
+`aiohttp_mako <https://github.com/aio-libs/aiohttp_mako>`_ library.
 
 
 User sessions
@@ -220,21 +266,33 @@ usually called *session*.
 :mod:`aiohttp.web` has no *sessions* but there is third-party
 :mod:`aiohttp_session` library for that::
 
-    import asycio
+    import asyncio
     import time
     from aiohttp import web
-    import aiohttp_session
+    from aiohttp_session import get_session, session_middleware
+    from aiohttp_session.cookie_storage import EncryptedCookieStorage
 
     @asyncio.coroutine
     def handler(request):
-        session = yield from aiohttp_session.get_session(request)
+        session = yield from get_session(request)
         session['last_visit'] = time.time()
-        return web.Response('OK')
+        return web.Response(body=b'OK')
 
-    app = web.Application(middlewares=aiohttp_session.session_middleware([
-        aiohttp_session.EncryptedCookieStorage(b'Sixteen byte key'))])
+    @asyncio.coroutine
+    def init(loop):
+        app = web.Application(middlewares=[session_middleware(
+            EncryptedCookieStorage(b'Sixteen byte key'))])
+        app.router.add_route('GET', '/', handler)
+        srv = yield from loop.create_server(
+            app.make_handler(), '0.0.0.0', 8080)
+        return srv
 
-    app.router.add_route('GET', '/', handler)
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(init(loop))
+    try:
+        loop.run_forever()
+    except KeyboardInterrupt:
+        pass
 
 
 .. _aiohttp-web-expect-header:
@@ -273,7 +331,7 @@ This example shows custom handler for *Except* header:
        return web.Response(body=b"Hello, world")
 
    app = web.Application()
-   app.router.add_route('GET', '/', hello, , except_handler=check_auth)
+   app.router.add_route('GET', '/', hello, expect_handler=check_auth)
 
 
 .. _aiohttp-web-file-upload:
@@ -362,13 +420,15 @@ using response's methods:
             elif msg.tp == aiohttp.MsgType.close:
                 print('websocket connection closed')
             elif msg.tp == aiohttp.MsgType.error:
-                print('ws connection closed with exception %s', ws.exception())
+                print('ws connection closed with exception %s',
+                      ws.exception())
 
         return ws
 
-You can have only one websocket reader task (which can call ``yield
-from ws.receive()``) and multiple writer tasks which can only send
-data asynchronously (by ``yield from ws.send_str('data')`` for example).
+You **must** use the only websocket task for both reading (e.g ``yield
+from ws.receive()``) and writing but may have multiple writer tasks
+which can only send data asynchronously (by ``yield from
+ws.send_str('data')`` for example).
 
 
 .. _aiohttp-web-exceptions:
@@ -401,7 +461,7 @@ Each exception class has a status code according to :rfc:`2068`:
 codes with 100-300 are not really errors; 400s are client errors,
 and 500s are server errors.
 
-Http Exception hierarchy chart::
+HTTP Exception hierarchy chart::
 
    Exception
      HTTPException
@@ -525,3 +585,31 @@ some pre- and post- processing like handling *CORS* and so on.
 
    Middleware accepts route exceptions (:exc:`HTTPNotFound` and
    :exc:`HTTPMethodNotAllowed`).
+
+
+Debug toolbar
+-------------
+
+`aiohttp_debugtoolbar
+<https://github.com/aio-libs/aiohttp_debugtoolbar>`_ is very useful
+library that provides debug toolbar while you're developing
+:mod:`aiohttp.web` application.
+
+Install it via ``pip`` tool::
+
+    $ pip install aiohttp_debugtoolbar
+
+
+After that attach middleware to your :class:`aiohttp.web.Application`
+and call ``aiohttp_debugtoolbar.setup``::
+
+    import aiohttp_debugtoolbar
+    from aiohttp_debugtoolbar import toolbar_middleware_factory
+
+    app = web.Application(loop=loop,
+                          middlewares=[toolbar_middleware_factory])
+    aiohttp_debugtoolbar.setup(app)
+
+Debug toolbar is ready to use. Enjoy!!!
+
+.. disqus::

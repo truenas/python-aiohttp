@@ -5,7 +5,7 @@ from aiohttp import helpers
 from aiohttp import MultiDict
 
 
-class HelpersTests(unittest.TestCase):
+class TestHelpers(unittest.TestCase):
 
     def test_parse_mimetype(self):
         self.assertEqual(
@@ -62,6 +62,29 @@ class HelpersTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             helpers.FormData('as')  # 2-char str is not allowed
 
+    def test_invalid_formdata_content_type(self):
+        form = helpers.FormData()
+        invalid_vals = [0, 0.1, {}, [], b'foo']
+        for invalid_val in invalid_vals:
+            with self.assertRaises(TypeError):
+                form.add_field('foo', 'bar', content_type=invalid_val)
+
+    def test_invalid_formdata_filename(self):
+        form = helpers.FormData()
+        invalid_vals = [0, 0.1, {}, [], b'foo']
+        for invalid_val in invalid_vals:
+            with self.assertRaises(TypeError):
+                form.add_field('foo', 'bar', filename=invalid_val)
+
+    def test_invalid_formdata_content_transfer_encoding(self):
+        form = helpers.FormData()
+        invalid_vals = [0, 0.1, {}, [], b'foo']
+        for invalid_val in invalid_vals:
+            with self.assertRaises(TypeError):
+                form.add_field('foo',
+                               'bar',
+                               content_transfer_encoding=invalid_val)
+
     def test_reify(self):
         class A:
             @helpers.reify
@@ -81,8 +104,19 @@ class HelpersTests(unittest.TestCase):
         self.assertIsInstance(A.prop, helpers.reify)
         self.assertEqual('Docstring.', A.prop.__doc__)
 
+    def test_reify_assignment(self):
+        class A:
+            @helpers.reify
+            def prop(self):
+                return 1
 
-class SafeAtomsTests(unittest.TestCase):
+        a = A()
+
+        with self.assertRaises(AttributeError):
+            a.prop = 123
+
+
+class TestSafeAtoms(unittest.TestCase):
 
     def test_get_non_existing(self):
         atoms = helpers.SafeAtoms(

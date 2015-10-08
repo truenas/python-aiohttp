@@ -1,9 +1,10 @@
 import asyncio
+import datetime
 import unittest
 from unittest import mock
 from aiohttp import hdrs
 from aiohttp.multidict import CIMultiDict
-from aiohttp.web import Request, StreamResponse, Response
+from aiohttp.web import ContentCoding, Request, StreamResponse, Response
 from aiohttp.protocol import HttpVersion, HttpVersion11, HttpVersion10
 from aiohttp.protocol import RawRequestMessage
 
@@ -103,6 +104,42 @@ class TestStreamResponse(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             resp.charset = 'koi8-r'
 
+    def test_last_modified_initial(self):
+        resp = StreamResponse()
+        self.assertIsNone(resp.last_modified)
+
+    def test_last_modified_string(self):
+        resp = StreamResponse()
+
+        dt = datetime.datetime(1990, 1, 2, 3, 4, 5, 0, datetime.timezone.utc)
+        resp.last_modified = 'Mon, 2 Jan 1990 03:04:05 GMT'
+        self.assertEqual(resp.last_modified, dt)
+
+    def test_last_modified_timestamp(self):
+        resp = StreamResponse()
+
+        dt = datetime.datetime(1970, 1, 1, 0, 0, 0, 0, datetime.timezone.utc)
+
+        resp.last_modified = 0
+        self.assertEqual(resp.last_modified, dt)
+
+        resp.last_modified = 0.0
+        self.assertEqual(resp.last_modified, dt)
+
+    def test_last_modified_datetime(self):
+        resp = StreamResponse()
+
+        dt = datetime.datetime(2001, 2, 3, 4, 5, 6, 0, datetime.timezone.utc)
+        resp.last_modified = dt
+        self.assertEqual(resp.last_modified, dt)
+
+    def test_last_modified_reset(self):
+        resp = StreamResponse()
+
+        resp.last_modified = 0
+        resp.last_modified = None
+        self.assertEqual(resp.last_modified, None)
+
     @mock.patch('aiohttp.web_reqrep.ResponseImpl')
     def test_start(self, ResponseImpl):
         req = self.make_request('GET', '/')
@@ -160,7 +197,7 @@ class TestStreamResponse(unittest.TestCase):
         self.assertFalse(msg.add_compression_filter.called)
 
     @mock.patch('aiohttp.web_reqrep.ResponseImpl')
-    def test_force_compression_no_accept(self, ResponseImpl):
+    def test_force_compression_no_accept_backwards_compat(self, ResponseImpl):
         req = self.make_request('GET', '/')
         resp = StreamResponse()
         self.assertFalse(resp.chunked)
@@ -174,7 +211,19 @@ class TestStreamResponse(unittest.TestCase):
         self.assertIsNotNone(msg.filter)
 
     @mock.patch('aiohttp.web_reqrep.ResponseImpl')
-    def test_compression(self, ResponseImpl):
+    def test_force_compression_false_backwards_compat(self, ResponseImpl):
+        req = self.make_request('GET', '/')
+        resp = StreamResponse()
+
+        self.assertFalse(resp.compression)
+        resp.enable_compression(force=False)
+        self.assertTrue(resp.compression)
+
+        msg = resp.start(req)
+        self.assertFalse(msg.add_compression_filter.called)
+
+    @mock.patch('aiohttp.web_reqrep.ResponseImpl')
+    def test_compression_default_coding(self, ResponseImpl):
         req = self.make_request(
             'GET', '/',
             headers=CIMultiDict({hdrs.ACCEPT_ENCODING: 'gzip, deflate'}))
@@ -186,8 +235,61 @@ class TestStreamResponse(unittest.TestCase):
         self.assertTrue(resp.compression)
 
         msg = resp.start(req)
-        self.assertTrue(msg.add_compression_filter.called)
+        msg.add_compression_filter.assert_called_with('deflate')
+        self.assertEqual('deflate', resp.headers.get(hdrs.CONTENT_ENCODING))
         self.assertIsNotNone(msg.filter)
+
+    @mock.patch('aiohttp.web_reqrep.ResponseImpl')
+    def test_force_compression_deflate(self, ResponseImpl):
+        req = self.make_request(
+            'GET', '/',
+            headers=CIMultiDict({hdrs.ACCEPT_ENCODING: 'gzip, deflate'}))
+        resp = StreamResponse()
+
+        resp.enable_compression(ContentCoding.deflate)
+        self.assertTrue(resp.compression)
+
+        msg = resp.start(req)
+        msg.add_compression_filter.assert_called_with('deflate')
+        self.assertEqual('deflate', resp.headers.get(hdrs.CONTENT_ENCODING))
+
+    @mock.patch('aiohttp.web_reqrep.ResponseImpl')
+    def test_force_compression_no_accept_deflate(self, ResponseImpl):
+        req = self.make_request('GET', '/')
+        resp = StreamResponse()
+
+        resp.enable_compression(ContentCoding.deflate)
+        self.assertTrue(resp.compression)
+
+        msg = resp.start(req)
+        msg.add_compression_filter.assert_called_with('deflate')
+        self.assertEqual('deflate', resp.headers.get(hdrs.CONTENT_ENCODING))
+
+    @mock.patch('aiohttp.web_reqrep.ResponseImpl')
+    def test_force_compression_gzip(self, ResponseImpl):
+        req = self.make_request(
+            'GET', '/',
+            headers=CIMultiDict({hdrs.ACCEPT_ENCODING: 'gzip, deflate'}))
+        resp = StreamResponse()
+
+        resp.enable_compression(ContentCoding.gzip)
+        self.assertTrue(resp.compression)
+
+        msg = resp.start(req)
+        msg.add_compression_filter.assert_called_with('gzip')
+        self.assertEqual('gzip', resp.headers.get(hdrs.CONTENT_ENCODING))
+
+    @mock.patch('aiohttp.web_reqrep.ResponseImpl')
+    def test_force_compression_no_accept_gzip(self, ResponseImpl):
+        req = self.make_request('GET', '/')
+        resp = StreamResponse()
+
+        resp.enable_compression(ContentCoding.gzip)
+        self.assertTrue(resp.compression)
+
+        msg = resp.start(req)
+        msg.add_compression_filter.assert_called_with('gzip')
+        self.assertEqual('gzip', resp.headers.get(hdrs.CONTENT_ENCODING))
 
     def test_write_non_byteish(self):
         resp = StreamResponse()
@@ -578,3 +680,8 @@ class TestResponse(unittest.TestCase):
         self.assertEqual('текст'.encode('koi8-r'), resp.body)
         self.assertEqual('text/html', resp.content_type)
         self.assertEqual('koi8-r', resp.charset)
+
+    def test_text_with_empty_payload(self):
+        resp = Response(status=200)
+        self.assertEqual(resp.body, None)
+        self.assertEqual(resp.text, None)

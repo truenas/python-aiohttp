@@ -176,6 +176,42 @@ class TestWebFunctional(unittest.TestCase):
             resp = yield from request('POST', url, data=[f],
                                       loop=self.loop)
             self.assertEqual(200, resp.status)
+            resp.close()
+            f.close()
+
+        self.loop.run_until_complete(go())
+
+    def test_files_upload_with_same_key(self):
+        @asyncio.coroutine
+        def handler(request):
+            data = yield from request.post()
+            files = data.getall('file')
+            _file_names = []
+            for _file in files:
+                self.assertFalse(_file.file.closed)
+                if _file.filename == 'test1.jpeg':
+                    self.assertEqual(_file.file.read(), b'binary data 1')
+                if _file.filename == 'test2.jpeg':
+                    self.assertEqual(_file.file.read(), b'binary data 2')
+                _file_names.append(_file.filename)
+            self.assertCountEqual(_file_names, ['test1.jpeg', 'test2.jpeg'])
+            resp = web.Response(body=b'OK')
+            return resp
+
+        @asyncio.coroutine
+        def go():
+            _, _, url = yield from self.create_server('POST', '/', handler)
+            _data = FormData()
+            _data.add_field('file', b'binary data 1',
+                            content_type='image/jpeg',
+                            filename='test1.jpeg')
+            _data.add_field('file', b'binary data 2',
+                            content_type='image/jpeg',
+                            filename='test2.jpeg')
+            resp = yield from request('POST', url, data=_data,
+                                      loop=self.loop)
+            self.assertEqual(200, resp.status)
+            resp.close()
 
         self.loop.run_until_complete(go())
 
@@ -209,15 +245,18 @@ class TestWebFunctional(unittest.TestCase):
             resp = yield from request('POST', url, data=[f1, f2],
                                       loop=self.loop)
             self.assertEqual(200, resp.status)
+            resp.close()
 
         self.loop.run_until_complete(go())
+        f1.close()
+        f2.close()
 
     def test_release_post_data(self):
 
         @asyncio.coroutine
         def handler(request):
             yield from request.release()
-            chunk = yield from request.payload.readany()
+            chunk = yield from request.content.readany()
             self.assertIs(EOF_MARKER, chunk)
             return web.Response(body=b'OK')
 
@@ -227,6 +266,7 @@ class TestWebFunctional(unittest.TestCase):
             resp = yield from request('POST', url, data='post text',
                                       loop=self.loop)
             self.assertEqual(200, resp.status)
+            resp.close()
 
         self.loop.run_until_complete(go())
 
@@ -250,6 +290,7 @@ class TestWebFunctional(unittest.TestCase):
                 loop=self.loop)
 
             self.assertEqual(200, resp.status)
+            resp.close()
 
         self.loop.run_until_complete(go())
 
@@ -265,18 +306,22 @@ class TestWebFunctional(unittest.TestCase):
             resp = yield from request('GET', url, loop=self.loop)
             self.assertEqual(200, resp.status)
             txt = yield from resp.text()
-            self.assertEqual('file content{}'.format(os.linesep), txt)
+            self.assertEqual('file content', txt.rstrip())
             ct = resp.headers['CONTENT-TYPE']
             self.assertEqual('application/octet-stream', ct)
             self.assertEqual(resp.headers.get('CONTENT-ENCODING'), None)
+            resp.close()
 
             resp = yield from request('GET', url + 'fake', loop=self.loop)
             self.assertEqual(404, resp.status)
+            resp.close()
+
             resp = yield from request('GET', url + '/../../', loop=self.loop)
             self.assertEqual(404, resp.status)
+            resp.close()
 
         here = os.path.dirname(__file__)
-        filename = os.path.join(here, 'data.unknown_mime_type')
+        filename = 'data.unknown_mime_type'
         self.loop.run_until_complete(go(here, filename))
 
     def test_static_file_with_content_type(self):
@@ -286,7 +331,7 @@ class TestWebFunctional(unittest.TestCase):
             app, _, url = yield from self.create_server(
                 'GET', '/static/' + filename
             )
-            app.router.add_static('/static', dirname)
+            app.router.add_static('/static', dirname, chunk_size=16)
 
             resp = yield from request('GET', url, loop=self.loop)
             self.assertEqual(200, resp.status)
@@ -297,14 +342,18 @@ class TestWebFunctional(unittest.TestCase):
             ct = resp.headers['CONTENT-TYPE']
             self.assertEqual('image/jpeg', ct)
             self.assertEqual(resp.headers.get('CONTENT-ENCODING'), None)
+            resp.close()
 
             resp = yield from request('GET', url + 'fake', loop=self.loop)
             self.assertEqual(404, resp.status)
+            resp.close()
+
             resp = yield from request('GET', url + '/../../', loop=self.loop)
             self.assertEqual(404, resp.status)
+            resp.close()
 
         here = os.path.dirname(__file__)
-        filename = os.path.join(here, 'software_development_in_picture.jpg')
+        filename = 'software_development_in_picture.jpg'
         self.loop.run_until_complete(go(here, filename))
 
     def test_static_file_with_content_encoding(self):
@@ -324,10 +373,129 @@ class TestWebFunctional(unittest.TestCase):
             self.assertEqual('text/plain', ct)
             encoding = resp.headers['CONTENT-ENCODING']
             self.assertEqual('gzip', encoding)
+            resp.close()
 
         here = os.path.dirname(__file__)
-        filename = os.path.join(here, 'hello.txt.gz')
+        filename = 'hello.txt.gz'
         self.loop.run_until_complete(go(here, filename))
+
+    def test_static_file_directory_traversal_attack(self):
+
+        @asyncio.coroutine
+        def go(dirname, relpath):
+            self.assertTrue(os.path.isfile(os.path.join(dirname, relpath)))
+
+            app, _, url = yield from self.create_server('GET', '/static/')
+            app.router.add_static('/static', dirname)
+
+            url_relpath = url + relpath
+            resp = yield from request('GET', url_relpath, loop=self.loop)
+            self.assertEqual(404, resp.status)
+            resp.close()
+
+            url_relpath2 = url + 'dir/../' + filename
+            resp = yield from request('GET', url_relpath2, loop=self.loop)
+            self.assertEqual(404, resp.status)
+            resp.close()
+
+            url_abspath = \
+                url + os.path.abspath(os.path.join(dirname, filename))
+            resp = yield from request('GET', url_abspath, loop=self.loop)
+            self.assertEqual(404, resp.status)
+            resp.close()
+
+        here = os.path.dirname(__file__)
+        filename = '../README.rst'
+        self.loop.run_until_complete(go(here, filename))
+
+    def test_static_file_if_modified_since(self):
+
+        @asyncio.coroutine
+        def go(dirname, filename):
+            app, _, url = yield from self.create_server(
+                'GET', '/static/' + filename
+            )
+            app.router.add_static('/static', dirname)
+
+            resp = yield from request('GET', url, loop=self.loop)
+            self.assertEqual(200, resp.status)
+            lastmod = resp.headers.get('Last-Modified')
+            self.assertIsNotNone(lastmod)
+            resp.close()
+
+            resp = yield from request('GET', url, loop=self.loop,
+                                      headers={'If-Modified-Since': lastmod})
+            self.assertEqual(304, resp.status)
+            resp.close()
+
+        here = os.path.dirname(__file__)
+        filename = 'data.unknown_mime_type'
+        self.loop.run_until_complete(go(here, filename))
+
+    def test_static_file_if_modified_since_past_date(self):
+
+        @asyncio.coroutine
+        def go(dirname, filename):
+            app, _, url = yield from self.create_server(
+                'GET', '/static/' + filename
+            )
+            app.router.add_static('/static', dirname)
+
+            lastmod = 'Mon, 1 Jan 1990 01:01:01 GMT'
+            resp = yield from request('GET', url, loop=self.loop,
+                                      headers={'If-Modified-Since': lastmod})
+            self.assertEqual(200, resp.status)
+            resp.close()
+
+        here = os.path.dirname(__file__)
+        filename = 'data.unknown_mime_type'
+        self.loop.run_until_complete(go(here, filename))
+
+    def test_static_file_if_modified_since_future_date(self):
+
+        @asyncio.coroutine
+        def go(dirname, filename):
+            app, _, url = yield from self.create_server(
+                'GET', '/static/' + filename
+            )
+            app.router.add_static('/static', dirname)
+
+            lastmod = 'Fri, 31 Dec 9999 23:59:59 GMT'
+            resp = yield from request('GET', url, loop=self.loop,
+                                      headers={'If-Modified-Since': lastmod})
+            self.assertEqual(304, resp.status)
+            resp.close()
+
+        here = os.path.dirname(__file__)
+        filename = 'data.unknown_mime_type'
+        self.loop.run_until_complete(go(here, filename))
+
+    def test_static_file_if_modified_since_invalid_date(self):
+
+        @asyncio.coroutine
+        def go(dirname, filename):
+            app, _, url = yield from self.create_server(
+                'GET', '/static/' + filename
+            )
+            app.router.add_static('/static', dirname)
+
+            lastmod = 'not a valid HTTP-date'
+            resp = yield from request('GET', url, loop=self.loop,
+                                      headers={'If-Modified-Since': lastmod})
+            self.assertEqual(200, resp.status)
+            resp.close()
+
+        here = os.path.dirname(__file__)
+        filename = 'data.unknown_mime_type'
+        self.loop.run_until_complete(go(here, filename))
+
+    def test_static_route_path_existence_check(self):
+        directory = os.path.dirname(__file__)
+        web.StaticRoute(None, "/", directory)
+
+        nodirectory = os.path.join(directory, "nonexistent-uPNiOEAg5d")
+        with self.assertRaises(ValueError):
+            web.StaticRoute(None, "/", nodirectory)
 
     def test_post_form_with_duplicate_keys(self):
 
@@ -381,6 +549,7 @@ class TestWebFunctional(unittest.TestCase):
                 loop=self.loop)
 
             self.assertEqual(200, resp.status)
+            resp.close()
 
         self.loop.run_until_complete(go())
 
@@ -420,6 +589,7 @@ class TestWebFunctional(unittest.TestCase):
 
             self.assertEqual(200, resp.status)
             self.assertTrue(expect_received)
+            resp.close()
 
         self.loop.run_until_complete(go())
 
@@ -459,6 +629,7 @@ class TestWebFunctional(unittest.TestCase):
                 loop=self.loop)
 
             self.assertEqual(200, resp.status)
+            resp.close(force=True)
 
             auth_err = True
             resp = yield from request(
@@ -466,6 +637,7 @@ class TestWebFunctional(unittest.TestCase):
                 expect100=True,  # wait until server returns 100 continue
                 loop=self.loop)
             self.assertEqual(403, resp.status)
+            resp.close(force=True)
 
         self.loop.run_until_complete(go())
 
@@ -490,6 +662,7 @@ class TestWebFunctional(unittest.TestCase):
                 loop=self.loop)
 
             self.assertEqual(404, resp.status)
+            resp.close()
 
         self.loop.run_until_complete(go())
 
@@ -514,6 +687,7 @@ class TestWebFunctional(unittest.TestCase):
                 loop=self.loop)
 
             self.assertEqual(405, resp.status)
+            resp.close()
 
         self.loop.run_until_complete(go())
 
@@ -530,6 +704,7 @@ class TestWebFunctional(unittest.TestCase):
             resp = yield from request('GET', url, loop=self.loop,
                                       version=HttpVersion10)
             self.assertEqual('close', resp.headers['CONNECTION'])
+            resp.close()
 
         self.loop.run_until_complete(go())
 
@@ -548,6 +723,7 @@ class TestWebFunctional(unittest.TestCase):
                                       headers=headers,
                                       version=HttpVersion(0, 9))
             self.assertEqual('close', resp.headers['CONNECTION'])
+            resp.close()
 
         self.loop.run_until_complete(go())
 
@@ -565,6 +741,7 @@ class TestWebFunctional(unittest.TestCase):
             resp = yield from request('GET', url, loop=self.loop,
                                       headers=headers, version=HttpVersion10)
             self.assertEqual('close', resp.headers['CONNECTION'])
+            resp.close()
 
         self.loop.run_until_complete(go())
 
@@ -582,5 +759,128 @@ class TestWebFunctional(unittest.TestCase):
             resp = yield from request('GET', url, loop=self.loop,
                                       headers=headers, version=HttpVersion10)
             self.assertEqual('keep-alive', resp.headers['CONNECTION'])
+            resp.close()
+
+        self.loop.run_until_complete(go())
+
+    def test_upload_file(self):
+
+        here = os.path.dirname(__file__)
+        fname = os.path.join(here, 'software_development_in_picture.jpg')
+        with open(fname, 'rb') as f:
+            data = f.read()
+
+        @asyncio.coroutine
+        def handler(request):
+            form = yield from request.post()
+            raw_data = form['file'].file.read()
+            self.assertEqual(data, raw_data)
+            return web.Response(body=b'OK')
+
+        @asyncio.coroutine
+        def go():
+            _, _, url = yield from self.create_server('POST', '/', handler)
+            resp = yield from request('POST', url,
+                                      data={'file': data},
+                                      loop=self.loop)
+            self.assertEqual(200, resp.status)
+            resp.close()
+
+        self.loop.run_until_complete(go())
+
+    def test_upload_file_object(self):
+
+        here = os.path.dirname(__file__)
+        fname = os.path.join(here, 'software_development_in_picture.jpg')
+        with open(fname, 'rb') as f:
+            data = f.read()
+
+        @asyncio.coroutine
+        def handler(request):
+            form = yield from request.post()
+            raw_data = form['file'].file.read()
+            self.assertEqual(data, raw_data)
+            return web.Response(body=b'OK')
+
+        @asyncio.coroutine
+        def go():
+            _, _, url = yield from self.create_server('POST', '/', handler)
+            f = open(fname, 'rb')
+            resp = yield from request('POST', url,
+                                      data={'file': f},
+                                      loop=self.loop)
+            self.assertEqual(200, resp.status)
+            resp.close()
+            f.close()
+
+        self.loop.run_until_complete(go())
+
+    def test_empty_content_for_query_without_body(self):
+
+        @asyncio.coroutine
+        def handler(request):
+            self.assertFalse(request.has_body)
+            return web.Response(body=b'OK')
+
+        @asyncio.coroutine
+        def go():
+            _, srv, url = yield from self.create_server('GET', '/', handler)
+            resp = yield from request('GET', url, loop=self.loop)
+            self.assertEqual(200, resp.status)
+            txt = yield from resp.text()
+            self.assertEqual('OK', txt)
+
+        self.loop.run_until_complete(go())
+
+    def test_empty_content_for_query_with_body(self):
+
+        @asyncio.coroutine
+        def handler(request):
+            self.assertTrue(request.has_body)
+            body = yield from request.read()
+            return web.Response(body=body)
+
+        @asyncio.coroutine
+        def go():
+            _, srv, url = yield from self.create_server('POST', '/', handler)
+            resp = yield from request('POST', url, data=b'data',
+                                      loop=self.loop)
+            self.assertEqual(200, resp.status)
+            txt = yield from resp.text()
+            self.assertEqual('data', txt)
+
+        self.loop.run_until_complete(go())
+
+    def test_get_with_empty_arg(self):
+
+        @asyncio.coroutine
+        def handler(request):
+            self.assertIn('arg', request.GET)
+            self.assertEqual('', request.GET['arg'])
+            return web.Response()
+
+        @asyncio.coroutine
+        def go():
+            _, srv, url = yield from self.create_server('GET', '/', handler)
+            resp = yield from request('GET', url+'?arg', loop=self.loop)
+            self.assertEqual(200, resp.status)
+            yield from resp.release()
+
+        self.loop.run_until_complete(go())
+
+    def test_get_with_empty_arg_with_equal(self):
+
+        @asyncio.coroutine
+        def handler(request):
+            self.assertIn('arg', request.GET)
+            self.assertEqual('', request.GET['arg'])
+            return web.Response()
+
+        @asyncio.coroutine
+        def go():
+            _, srv, url = yield from self.create_server('GET', '/', handler)
+            resp = yield from request('GET', url+'?arg=', loop=self.loop)
+            self.assertEqual(200, resp.status)
+            yield from resp.release()
 
         self.loop.run_until_complete(go())

@@ -173,11 +173,13 @@ class _BaseTest(_Root):
 
         self.assertNotEqual(d.keys(), {'key2'})
 
-    @unittest.skipIf(HAS_NO_SET_OPS_FOR_VIEW,
-                     "Set operations on views not supported")
     def test_eq(self):
         d = self.make_dict([('key', 'value1')])
         self.assertEqual({'key': 'value1'}, d)
+
+    def test_ne(self):
+        d = self.make_dict([('key', 'value1')])
+        self.assertNotEqual(d, {'key': 'another_value'})
 
     @unittest.skipIf(HAS_NO_SET_OPS_FOR_VIEW,
                      "Set operations on views not supported")
@@ -214,6 +216,54 @@ class _BaseTest(_Root):
     def test_isdisjoint2(self):
         d = self.make_dict([('key', 'value1')])
         self.assertFalse(d.keys().isdisjoint({'key'}))
+
+    def test_repr_issue_410(self):
+        d = self.make_dict()
+        try:
+            raise Exception
+        except Exception as e:
+            repr(d)
+            self.assertIs(sys.exc_info()[1], e)
+
+    @unittest.skipIf(HAS_NO_SET_OPS_FOR_VIEW,
+                     "Set operations on views not supported")
+    def test_or_issue_410(self):
+        d = self.make_dict([('key', 'value')])
+        try:
+            raise Exception
+        except Exception as e:
+            d.keys() | {'other'}
+            self.assertIs(sys.exc_info()[1], e)
+
+    @unittest.skipIf(HAS_NO_SET_OPS_FOR_VIEW,
+                     "Set operations on views not supported")
+    def test_and_issue_410(self):
+        d = self.make_dict([('key', 'value')])
+        try:
+            raise Exception
+        except Exception as e:
+            d.keys() & {'other'}
+            self.assertIs(sys.exc_info()[1], e)
+
+    @unittest.skipIf(HAS_NO_SET_OPS_FOR_VIEW,
+                     "Set operations on views not supported")
+    def test_sub_issue_410(self):
+        d = self.make_dict([('key', 'value')])
+        try:
+            raise Exception
+        except Exception as e:
+            d.keys() - {'other'}
+            self.assertIs(sys.exc_info()[1], e)
+
+    @unittest.skipIf(HAS_NO_SET_OPS_FOR_VIEW,
+                     "Set operations on views not supported")
+    def test_xor_issue_410(self):
+        d = self.make_dict([('key', 'value')])
+        try:
+            raise Exception
+        except Exception as e:
+            d.keys() ^ {'other'}
+            self.assertIs(sys.exc_info()[1], e)
 
 
 class _MultiDictTests(_BaseTest):
@@ -252,6 +302,21 @@ class _MultiDictTests(_BaseTest):
         d = self.make_dict([('a', 1), ('a', 2)])
         self.assertEqual(1, d['a'])
 
+    def test_items__repr__(self):
+        d = self.make_dict([('key', 'value1')], key='value2')
+        self.assertEqual(repr(d.items()),
+                         "_ItemsView([('key', 'value1'), ('key', 'value2')])")
+
+    def test_keys__repr__(self):
+        d = self.make_dict([('key', 'value1')], key='value2')
+        self.assertEqual(repr(d.keys()),
+                         "_KeysView([('key', 'value1'), ('key', 'value2')])")
+
+    def test_values__repr__(self):
+        d = self.make_dict([('key', 'value1')], key='value2')
+        self.assertEqual(repr(d.values()),
+                         "_ValuesView([('key', 'value1'), ('key', 'value2')])")
+
 
 class _CIMultiDictTests(_Root):
 
@@ -282,6 +347,21 @@ class _CIMultiDictTests(_Root):
     def test_get(self):
         d = self.make_dict([('A', 1), ('a', 2)])
         self.assertEqual(1, d['a'])
+
+    def test_items__repr__(self):
+        d = self.make_dict([('KEY', 'value1')], key='value2')
+        self.assertEqual(repr(d.items()),
+                         "_ItemsView([('KEY', 'value1'), ('KEY', 'value2')])")
+
+    def test_keys__repr__(self):
+        d = self.make_dict([('KEY', 'value1')], key='value2')
+        self.assertEqual(repr(d.keys()),
+                         "_KeysView([('KEY', 'value1'), ('KEY', 'value2')])")
+
+    def test_values__repr__(self):
+        d = self.make_dict([('KEY', 'value1')], key='value2')
+        self.assertEqual(repr(d.values()),
+                         "_ValuesView([('KEY', 'value1'), ('KEY', 'value2')])")
 
 
 class _NonProxyCIMultiDict(_CIMultiDictTests):
