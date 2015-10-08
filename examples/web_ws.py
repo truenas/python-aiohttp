@@ -25,7 +25,6 @@ def wshandler(request):
 
     while True:
         msg = yield from resp.receive()
-        print(msg)
 
         if msg.tp == MsgType.text:
             for ws in request.app['sockets']:

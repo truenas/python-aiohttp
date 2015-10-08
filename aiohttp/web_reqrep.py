@@ -18,7 +18,7 @@ from .multidict import (CIMultiDictProxy,
                         CIMultiDict,
                         MultiDictProxy,
                         MultiDict)
-from .protocol import Response as ResponseImpl, HttpVersion11
+from .protocol import Response as ResponseImpl, HttpVersion10
 from .streams import EOF_MARKER
 
 
@@ -76,6 +76,9 @@ FileField = collections.namedtuple('Field', 'name filename file content_type')
 
 class Request(dict, HeadersMixin):
 
+    POST_METHODS = {hdrs.METH_PATCH, hdrs.METH_POST, hdrs.METH_PUT,
+                    hdrs.METH_TRACE, hdrs.METH_DELETE}
+
     def __init__(self, app, message, payload, transport, reader, writer, *,
                  _HOST=hdrs.HOST):
         self._app = app
@@ -92,13 +95,10 @@ class Request(dict, HeadersMixin):
         self._post = None
         self._post_files_cache = None
         self._headers = CIMultiDictProxy(message.headers)
-
-        if self._version < HttpVersion11:
-            self._keep_alive = False
-        elif message.should_close:
+        if self._version < HttpVersion10:
             self._keep_alive = False
         else:
-            self._keep_alive = True
+            self._keep_alive = not message.should_close
 
         # matchdict, route_name, handler
         # or information about traversal lookup
@@ -271,7 +271,7 @@ class Request(dict, HeadersMixin):
         """Return POST parameters."""
         if self._post is not None:
             return self._post
-        if self.method not in ('POST', 'PUT', 'PATCH'):
+        if self.method not in self.POST_METHODS:
             self._post = MultiDictProxy(MultiDict())
             return self._post
 
@@ -303,7 +303,7 @@ class Request(dict, HeadersMixin):
         out = MultiDict()
         for field in fs.list or ():
             transfer_encoding = field.headers.get(
-                'Content-Transfer-Encoding', None)
+                hdrs.CONTENT_TRANSFER_ENCODING, None)
             if field.filename:
                 ff = FileField(field.name,
                                field.filename,
@@ -337,7 +337,7 @@ class Request(dict, HeadersMixin):
 
 class StreamResponse(HeadersMixin):
 
-    def __init__(self, *, status=200, reason=None):
+    def __init__(self, *, status=200, reason=None, headers=None):
         self._body = None
         self._keep_alive = None
         self._chunked = False
@@ -351,6 +351,9 @@ class StreamResponse(HeadersMixin):
         self._req = None
         self._resp_impl = None
         self._eof_sent = False
+
+        if headers is not None:
+            self._headers.extend(headers)
 
     def _copy_cookies(self):
         for cookie in self._cookies.values():
@@ -547,9 +550,8 @@ class StreamResponse(HeadersMixin):
         return resp_impl
 
     def write(self, data):
-        if not isinstance(data, (bytes, bytearray, memoryview)):
-            raise TypeError('data argument must be byte-ish (%r)' %
-                            type(data))
+        assert isinstance(data, (bytes, bytearray, memoryview)), \
+            'data argument must be byte-ish (%r)' % type(data)
 
         if self._eof_sent:
             raise RuntimeError("Cannot call write() after write_eof()")
@@ -589,12 +591,8 @@ class StreamResponse(HeadersMixin):
 class Response(StreamResponse):
 
     def __init__(self, *, body=None, status=200,
-                 reason=None, headers=None,
-                 text=None, content_type=None):
-        super().__init__(status=status, reason=reason)
-
-        if headers is not None:
-            self.headers.extend(headers)
+                 reason=None, text=None, headers=None, content_type=None):
+        super().__init__(status=status, reason=reason, headers=headers)
 
         if body is not None and text is not None:
             raise ValueError("body and text are not allowed together.")

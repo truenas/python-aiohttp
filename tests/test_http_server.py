@@ -67,6 +67,23 @@ class HttpServerProtocolTests(unittest.TestCase):
         self.assertIsNone(srv._request_handler)
         self.assertTrue(request_handler.cancel.called)
 
+    def test_closing_during_reading(self):
+        srv = server.ServerHttpProtocol(loop=self.loop)
+        srv._keep_alive = True
+        srv._keep_alive_on = True
+        srv._reading_request = True
+        srv._timeout_handle = timeout_handle = unittest.mock.Mock()
+        transport = srv.transport = unittest.mock.Mock()
+
+        srv.closing()
+        self.assertFalse(transport.close.called)
+        self.assertIsNotNone(srv.transport)
+
+        # cancel existing slow request handler
+        self.assertIsNotNone(srv._timeout_handle)
+        self.assertTrue(timeout_handle.cancel.called)
+        self.assertIsNot(timeout_handle, srv._timeout_handle)
+
     def test_double_closing(self):
         srv = server.ServerHttpProtocol(loop=self.loop)
         srv._keep_alive = True
@@ -94,7 +111,7 @@ class HttpServerProtocolTests(unittest.TestCase):
         self.assertFalse(timeout_handle.cancel.called)
 
     def test_connection_made(self):
-        srv = server.ServerHttpProtocol(loop=self.loop)
+        srv = server.ServerHttpProtocol(loop=self.loop, timeout=15)
         self.assertIsNone(srv._request_handler)
 
         srv.connection_made(unittest.mock.Mock())
@@ -118,7 +135,7 @@ class HttpServerProtocolTests(unittest.TestCase):
                                            socket.SO_KEEPALIVE, 1)
 
     def test_connection_made_without_keepaplive(self):
-        srv = server.ServerHttpProtocol(loop=self.loop, tcp_keepalive=False)
+        srv = server.ServerHttpProtocol(loop=self.loop, keep_alive_on=False)
 
         sock = unittest.mock.Mock()
         transport = unittest.mock.Mock()
@@ -191,34 +208,6 @@ class HttpServerProtocolTests(unittest.TestCase):
         srv.connection_lost(None)
         self.assertIsNone(srv._timeout_handle)
 
-    def test_not_allowed_methods(self):
-        transport = unittest.mock.Mock()
-        srv = server.ServerHttpProtocol(
-            timeout=0.01, allowed_methods=('GET',), loop=self.loop)
-        srv.connection_made(transport)
-
-        srv.reader.feed_data(
-            b'POST / HTTP/1.0\r\n'
-            b'Host: example.com\r\n\r\n')
-
-        self.loop.run_until_complete(srv._request_handler)
-        self.assertTrue(transport.write.mock_calls[0][1][0].startswith(
-            b'HTTP/1.1 405 Method Not Allowed\r\n'))
-
-    def test_allowed_methods(self):
-        transport = unittest.mock.Mock()
-        srv = server.ServerHttpProtocol(
-            timeout=0.01, allowed_methods=('GET',), loop=self.loop)
-        srv.connection_made(transport)
-
-        srv.reader.feed_data(
-            b'GET / HTTP/1.0\r\n'
-            b'Host: example.com\r\n\r\n')
-
-        self.loop.run_until_complete(srv._request_handler)
-        self.assertTrue(transport.write.mock_calls[0][1][0].startswith(
-            b'HTTP/1.0 404 Not Found\r\n'))
-
     def test_bad_method(self):
         transport = unittest.mock.Mock()
         srv = server.ServerHttpProtocol(loop=self.loop)
@@ -226,7 +215,7 @@ class HttpServerProtocolTests(unittest.TestCase):
 
         srv.reader.feed_data(
             b'!@#$ / HTTP/1.0\r\n'
-            b'Host: example.com\r\n')
+            b'Host: example.com\r\n\r\n')
 
         self.loop.run_until_complete(srv._request_handler)
         self.assertTrue(transport.write.mock_calls[0][1][0].startswith(
@@ -481,8 +470,10 @@ class HttpServerProtocolTests(unittest.TestCase):
         srv._keep_alive_period = 15
         keep_alive_handle = srv._keep_alive_handle = unittest.mock.Mock()
         srv.handle_request = unittest.mock.Mock()
+        srv.handle_request.return_value = asyncio.Future(loop=self.loop)
+        srv.handle_request.return_value.set_result(1)
 
-        srv.reader.feed_data(
+        srv.data_received(
             b'GET / HTTP/1.0\r\n'
             b'HOST: example.com\r\n\r\n')
 

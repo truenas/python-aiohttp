@@ -1,5 +1,3 @@
-.gitignore
-.travis.yml
 CHANGES.txt
 CONTRIBUTORS.txt
 LICENSE.txt
@@ -39,6 +37,7 @@ aiohttp/wsgi.py
 aiohttp.egg-info/PKG-INFO
 aiohttp.egg-info/SOURCES.txt
 aiohttp.egg-info/dependency_links.txt
+aiohttp.egg-info/requires.txt
 aiohttp.egg-info/top_level.txt
 docs/Makefile
 docs/aiohttp-icon.ico
@@ -75,13 +74,17 @@ examples/web_ws.py
 examples/websocket.html
 examples/wsclient.py
 examples/wssrv.py
+tests/data.unknown_mime_type
+tests/hello.txt.gz
 tests/sample.crt
 tests/sample.key
 tests/software_development_in_picture.jpg
 tests/test_client.py
 tests/test_client_functional.py
+tests/test_client_session.py
 tests/test_connector.py
 tests/test_errors.py
+tests/test_flowcontrol_streams.py
 tests/test_helpers.py
 tests/test_http_parser.py
 tests/test_http_protocol.py

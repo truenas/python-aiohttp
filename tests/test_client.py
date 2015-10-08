@@ -7,14 +7,10 @@ import io
 import unittest
 import unittest.mock
 import urllib.parse
+import os.path
 
 import aiohttp
 from aiohttp.client import ClientRequest, ClientResponse
-
-try:
-    import chardet
-except ImportError:  # pragma: no cover
-    chardet = None
 
 
 class ClientResponseTests(unittest.TestCase):
@@ -143,13 +139,14 @@ class ClientResponseTests(unittest.TestCase):
         content = self.response.content = unittest.mock.Mock()
         content.read.side_effect = side_effect
         self.response.close = unittest.mock.Mock()
+        self.response._get_encoding = unittest.mock.Mock()
 
         res = self.loop.run_until_complete(
             self.response.text(encoding='cp1251'))
         self.assertEqual(res, '{"тест": "пройден"}')
         self.assertTrue(self.response.close.called)
+        self.assertFalse(self.response._get_encoding.called)
 
-    @unittest.skipIf(chardet is None, "no chardet")
     def test_text_detect_encoding(self):
         def side_effect(*args, **kwargs):
             fut = asyncio.Future(loop=self.loop)
@@ -163,21 +160,6 @@ class ClientResponseTests(unittest.TestCase):
         res = self.loop.run_until_complete(self.response.text())
         self.assertEqual(res, '{"тест": "пройден"}')
         self.assertTrue(self.response.close.called)
-
-    def test_text_detect_encoding_without_chardet(self):
-        def side_effect(*args, **kwargs):
-            fut = asyncio.Future(loop=self.loop)
-            fut.set_result('{"тест": "пройден"}'.encode('cp1251'))
-            return fut
-        self.response.headers = {'CONTENT-TYPE': 'application/json'}
-        content = self.response.content = unittest.mock.Mock()
-        content.read.side_effect = side_effect
-        self.response.close = unittest.mock.Mock()
-
-        with unittest.mock.patch('aiohttp.client.chardet', None):
-            self.assertRaises(UnicodeDecodeError,
-                              self.loop.run_until_complete,
-                              self.response.text())
 
     def test_json(self):
         def side_effect(*args, **kwargs):
@@ -228,13 +210,14 @@ class ClientResponseTests(unittest.TestCase):
         content = self.response.content = unittest.mock.Mock()
         content.read.side_effect = side_effect
         self.response.close = unittest.mock.Mock()
+        self.response._get_encoding = unittest.mock.Mock()
 
         res = self.loop.run_until_complete(
             self.response.json(encoding='cp1251'))
         self.assertEqual(res, {'тест': 'пройден'})
         self.assertTrue(self.response.close.called)
+        self.assertFalse(self.response._get_encoding.called)
 
-    @unittest.skipIf(chardet is None, "no chardet")
     def test_json_detect_encoding(self):
         def side_effect(*args, **kwargs):
             fut = asyncio.Future(loop=self.loop)
@@ -249,21 +232,6 @@ class ClientResponseTests(unittest.TestCase):
         self.assertEqual(res, {'тест': 'пройден'})
         self.assertTrue(self.response.close.called)
 
-    def test_json_detect_encoding_without_chardet(self):
-        def side_effect(*args, **kwargs):
-            fut = asyncio.Future(loop=self.loop)
-            fut.set_result('{"тест": "пройден"}'.encode('cp1251'))
-            return fut
-        self.response.headers = {'CONTENT-TYPE': 'application/json'}
-        content = self.response.content = unittest.mock.Mock()
-        content.read.side_effect = side_effect
-        self.response.close = unittest.mock.Mock()
-
-        with unittest.mock.patch('aiohttp.client.chardet', None):
-            self.assertRaises(UnicodeDecodeError,
-                              self.loop.run_until_complete,
-                              self.response.json())
-
     def test_override_flow_control(self):
         class MyResponse(ClientResponse):
             flow_control_class = aiohttp.FlowControlDataQueue
@@ -272,6 +240,13 @@ class ClientResponseTests(unittest.TestCase):
         self.assertIsInstance(response.content, aiohttp.FlowControlDataQueue)
         with self.assertWarns(ResourceWarning):
             del response
+
+    @unittest.mock.patch('aiohttp.client.chardet')
+    def test_get_encoding_unknown(self, m_chardet):
+        m_chardet.detect.return_value = {'encoding': None}
+
+        self.response.headers = {'CONTENT-TYPE': 'application/json'}
+        self.assertEqual(self.response._get_encoding(None), 'utf-8')
 
 
 class ClientRequestTests(unittest.TestCase):
@@ -578,6 +553,39 @@ class ClientRequestTests(unittest.TestCase):
         req.send(self.transport, self.protocol)
         self.assertEqual(req.headers['TRANSFER-ENCODING'], 'chunked')
         self.assertNotIn('CONTENT-LENGTH', req.headers)
+
+    def test_file_upload_not_chunked(self):
+        here = os.path.dirname(__file__)
+        fname = os.path.join(here, 'sample.key')
+        with open(fname, 'rb') as f:
+            req = ClientRequest(
+                'post', 'http://python.org/',
+                data=f)
+            self.assertFalse(req.chunked)
+            self.assertEqual(req.headers['CONTENT-LENGTH'],
+                             str(os.path.getsize(fname)))
+
+    def test_file_upload_not_chunked_seek(self):
+        here = os.path.dirname(__file__)
+        fname = os.path.join(here, 'sample.key')
+        with open(fname, 'rb') as f:
+            f.seek(100)
+            req = ClientRequest(
+                'post', 'http://python.org/',
+                data=f)
+            self.assertEqual(req.headers['CONTENT-LENGTH'],
+                             str(os.path.getsize(fname) - 100))
+
+    def test_file_upload_force_chunked(self):
+        here = os.path.dirname(__file__)
+        fname = os.path.join(here, 'sample.key')
+        with open(fname, 'rb') as f:
+            req = ClientRequest(
+                'post', 'http://python.org/',
+                data=f,
+                chunked=True)
+            self.assertTrue(req.chunked)
+            self.assertNotIn('CONTENT-LENGTH', req.headers)
 
     def test_expect100(self):
         req = ClientRequest('get', 'http://python.org/',

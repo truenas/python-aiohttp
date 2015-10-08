@@ -3,20 +3,22 @@ import json
 import os.path
 import socket
 import unittest
-import tempfile
-from aiohttp import web, request, FormData
+from aiohttp import log, web, request, FormData
 from aiohttp.multidict import MultiDict
-from aiohttp.protocol import HttpVersion11
+from aiohttp.protocol import HttpVersion, HttpVersion10, HttpVersion11
 from aiohttp.streams import EOF_MARKER
 
 
 class TestWebFunctional(unittest.TestCase):
 
     def setUp(self):
+        self.handler = None
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(None)
 
     def tearDown(self):
+        if self.handler:
+            self.loop.run_until_complete(self.handler.finish_connections())
         self.loop.close()
 
     def find_unused_port(self):
@@ -33,8 +35,11 @@ class TestWebFunctional(unittest.TestCase):
             app.router.add_route(method, path, handler)
 
         port = self.find_unused_port()
+        self.handler = app.make_handler(
+            debug=True, keep_alive_on=False,
+            access_log=log.access_logger)
         srv = yield from self.loop.create_server(
-            app.make_handler(keep_alive=None), '127.0.0.1', port)
+            self.handler, '127.0.0.1', port)
         url = "http://127.0.0.1:{}".format(port) + path
         self.addCleanup(srv.close)
         return app, srv, url
@@ -149,8 +154,8 @@ class TestWebFunctional(unittest.TestCase):
 
         def check_file(fs):
             fullname = os.path.join(here, fs.filename)
-            with open(fullname, 'rb') as f:
-                test_data = f.read()
+            with open(fullname, 'r') as f:
+                test_data = f.read().encode()
                 data = fs.file.read()
                 self.assertEqual(test_data, data)
 
@@ -183,8 +188,8 @@ class TestWebFunctional(unittest.TestCase):
 
         def check_file(fs):
             fullname = os.path.join(here, fs.filename)
-            with open(fullname, 'rb') as f:
-                test_data = f.read()
+            with open(fullname, 'r') as f:
+                test_data = f.read().encode()
                 data = fs.file.read()
                 self.assertEqual(test_data, data)
 
@@ -251,31 +256,28 @@ class TestWebFunctional(unittest.TestCase):
     def test_static_file(self):
 
         @asyncio.coroutine
-        def go(tmpdirname, filename):
+        def go(dirname, filename):
             app, _, url = yield from self.create_server(
                 'GET', '/static/' + filename
             )
-            app.router.add_static('/static', tmpdirname)
+            app.router.add_static('/static', dirname)
 
             resp = yield from request('GET', url, loop=self.loop)
             self.assertEqual(200, resp.status)
             txt = yield from resp.text()
-            self.assertEqual('file content', txt)
+            self.assertEqual('file content{}'.format(os.linesep), txt)
             ct = resp.headers['CONTENT-TYPE']
             self.assertEqual('application/octet-stream', ct)
+            self.assertEqual(resp.headers.get('CONTENT-ENCODING'), None)
 
             resp = yield from request('GET', url + 'fake', loop=self.loop)
             self.assertEqual(404, resp.status)
             resp = yield from request('GET', url + '/../../', loop=self.loop)
             self.assertEqual(404, resp.status)
 
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            with tempfile.NamedTemporaryFile(dir=tmpdirname) as fp:
-                filename = os.path.basename(fp.name)
-                fp.write(b'file content')
-                fp.flush()
-                fp.seek(0)
-                self.loop.run_until_complete(go(tmpdirname, filename))
+        here = os.path.dirname(__file__)
+        filename = os.path.join(here, 'data.unknown_mime_type')
+        self.loop.run_until_complete(go(here, filename))
 
     def test_static_file_with_content_type(self):
 
@@ -294,6 +296,7 @@ class TestWebFunctional(unittest.TestCase):
                 self.assertEqual(content, body)
             ct = resp.headers['CONTENT-TYPE']
             self.assertEqual('image/jpeg', ct)
+            self.assertEqual(resp.headers.get('CONTENT-ENCODING'), None)
 
             resp = yield from request('GET', url + 'fake', loop=self.loop)
             self.assertEqual(404, resp.status)
@@ -302,6 +305,28 @@ class TestWebFunctional(unittest.TestCase):
 
         here = os.path.dirname(__file__)
         filename = os.path.join(here, 'software_development_in_picture.jpg')
+        self.loop.run_until_complete(go(here, filename))
+
+    def test_static_file_with_content_encoding(self):
+
+        @asyncio.coroutine
+        def go(dirname, filename):
+            app, _, url = yield from self.create_server(
+                'GET', '/static/' + filename
+            )
+            app.router.add_static('/static', dirname)
+
+            resp = yield from request('GET', url, loop=self.loop)
+            self.assertEqual(200, resp.status)
+            body = yield from resp.read()
+            self.assertEqual(b'hello aiohttp\n', body)
+            ct = resp.headers['CONTENT-TYPE']
+            self.assertEqual('text/plain', ct)
+            encoding = resp.headers['CONTENT-ENCODING']
+            self.assertEqual('gzip', encoding)
+
+        here = os.path.dirname(__file__)
+        filename = os.path.join(here, 'hello.txt.gz')
         self.loop.run_until_complete(go(here, filename))
 
     def test_post_form_with_duplicate_keys(self):
@@ -441,5 +466,121 @@ class TestWebFunctional(unittest.TestCase):
                 expect100=True,  # wait until server returns 100 continue
                 loop=self.loop)
             self.assertEqual(403, resp.status)
+
+        self.loop.run_until_complete(go())
+
+    def test_100_continue_for_not_found(self):
+
+        @asyncio.coroutine
+        def handler(request):
+            return web.Response()
+
+        @asyncio.coroutine
+        def go():
+            app, _, url = yield from self.create_server('POST', '/')
+            app.router.add_route('POST', '/', handler)
+
+            form = FormData()
+            form.add_field('name', b'123',
+                           content_transfer_encoding='base64')
+
+            resp = yield from request(
+                'post', url + 'not_found', data=form,
+                expect100=True,  # wait until server returns 100 continue
+                loop=self.loop)
+
+            self.assertEqual(404, resp.status)
+
+        self.loop.run_until_complete(go())
+
+    def test_100_continue_for_not_allowed(self):
+
+        @asyncio.coroutine
+        def handler(request):
+            return web.Response()
+
+        @asyncio.coroutine
+        def go():
+            app, _, url = yield from self.create_server('POST', '/')
+            app.router.add_route('POST', '/', handler)
+
+            form = FormData()
+            form.add_field('name', b'123',
+                           content_transfer_encoding='base64')
+
+            resp = yield from request(
+                'GET', url, data=form,
+                expect100=True,  # wait until server returns 100 continue
+                loop=self.loop)
+
+            self.assertEqual(405, resp.status)
+
+        self.loop.run_until_complete(go())
+
+    def test_http10_keep_alive_default(self):
+
+        @asyncio.coroutine
+        def handler(request):
+            yield from request.read()
+            return web.Response(body=b'OK')
+
+        @asyncio.coroutine
+        def go():
+            _, _, url = yield from self.create_server('GET', '/', handler)
+            resp = yield from request('GET', url, loop=self.loop,
+                                      version=HttpVersion10)
+            self.assertEqual('close', resp.headers['CONNECTION'])
+
+        self.loop.run_until_complete(go())
+
+    def test_http09_keep_alive_default(self):
+
+        @asyncio.coroutine
+        def handler(request):
+            yield from request.read()
+            return web.Response(body=b'OK')
+
+        @asyncio.coroutine
+        def go():
+            headers = {'Connection': 'keep-alive'}  # should be ignored
+            _, _, url = yield from self.create_server('GET', '/', handler)
+            resp = yield from request('GET', url, loop=self.loop,
+                                      headers=headers,
+                                      version=HttpVersion(0, 9))
+            self.assertEqual('close', resp.headers['CONNECTION'])
+
+        self.loop.run_until_complete(go())
+
+    def test_http10_keep_alive_with_headers_close(self):
+
+        @asyncio.coroutine
+        def handler(request):
+            yield from request.read()
+            return web.Response(body=b'OK')
+
+        @asyncio.coroutine
+        def go():
+            _, _, url = yield from self.create_server('GET', '/', handler)
+            headers = {'Connection': 'close'}
+            resp = yield from request('GET', url, loop=self.loop,
+                                      headers=headers, version=HttpVersion10)
+            self.assertEqual('close', resp.headers['CONNECTION'])
+
+        self.loop.run_until_complete(go())
+
+    def test_http10_keep_alive_with_headers(self):
+
+        @asyncio.coroutine
+        def handler(request):
+            yield from request.read()
+            return web.Response(body=b'OK')
+
+        @asyncio.coroutine
+        def go():
+            _, _, url = yield from self.create_server('GET', '/', handler)
+            headers = {'Connection': 'keep-alive'}
+            resp = yield from request('GET', url, loop=self.loop,
+                                      headers=headers, version=HttpVersion10)
+            self.assertEqual('keep-alive', resp.headers['CONNECTION'])
 
         self.loop.run_until_complete(go())

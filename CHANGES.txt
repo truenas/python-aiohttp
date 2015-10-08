@@ -1,6 +1,36 @@
 CHANGES
 =======
 
+0.15.3 (04-22-2015)
+-------------------
+
+- Fix graceful shutdown handling
+
+- Fix `Expect` header handling for not found and not allowed routes #340
+
+
+0.15.2 (04-19-2015)
+-------------------
+
+- Flow control subsystem refactoring
+
+- Http server performace optimizations
+
+- Allow to match any request method with `*`
+
+- Explicitly call drain on transport #316
+
+- Make chardet module dependency mandatory #318
+
+- Support keep-alive for HTTP 1.0 #325
+
+- Do not chunk single file during upload #327
+
+- Add ClientSession object for cookie storage and default headers #328
+
+- Add `keep_alive_on` argument for http server handler.
+
+
 0.15.1 (03-31-2015)
 -------------------
 

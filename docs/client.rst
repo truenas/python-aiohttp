@@ -146,12 +146,14 @@ is possible to specify custom encoding and decoder functions for the
 Streaming Response Content
 --------------------------
 
-While methods ``read()``, ``json()`` and ``text()`` are very convenient
-you should use them carefully. All this methods loads the whole response in memory.
-For example if you want to download several gigabyte sized files, this methods
-will load all the data in memory. Instead you can use the ``ClientResponse.content``
-attribute. It is an instance of the ``aiohttp.StreamReader`` class. The ``gzip``
-and ``deflate`` transfer-encodings are automatically decoded for you.
+While methods ``read()``, ``json()`` and ``text()`` are very
+convenient you should use them carefully. All this methods loads the
+whole response in memory.  For example if you want to download several
+gigabyte sized files, this methods will load all the data in
+memory. Instead you can use the ``ClientResponse.content``
+attribute. It is an instance of the ``aiohttp.StreamReader``
+class. The ``gzip`` and ``deflate`` transfer-encodings are
+automatically decoded for you.
 
 .. code::
 
@@ -179,8 +181,8 @@ with ``chunk_size``.
 Custom Headers
 --------------
 
-If you need to add HTTP headers to a request, pass them in a ``dict`` to the
-``headers`` parameter.
+If you need to add HTTP headers to a request, pass them in a
+:class:`dict` to the *headers* parameter.
 
 For example, if you want to specify the content-type for the previous example::
 
@@ -195,11 +197,25 @@ For example, if you want to specify the content-type for the previous example::
     ...                                headers=headers)
 
 
+Custom Cookies
+--------------
+
+To send your own cookies to the server, you can use the *cookies*
+parameter::
+
+    >>> url = 'http://httpbin.org/cookies'
+    >>> cookies = dict(cookies_are='working')
+
+    >>> r = yield from aiohttp.request('get', url, cookies=cookies)
+    >>> yield from r.text()
+    '{"cookies": {"cookies_are": "working"}}'
+
+
 More complicated POST requests
 ------------------------------
 
 Typically, you want to send some form-encoded data — much like an HTML form.
-To do this, simply pass a dictionary to the ``data`` argument. Your
+To do this, simply pass a dictionary to the *data* argument. Your
 dictionary of data will automatically be form-encoded when the request is made::
 
     >>> payload = {'key1': 'value1', 'key2': 'value2'}
@@ -216,8 +232,9 @@ dictionary of data will automatically be form-encoded when the request is made::
       ...
     }
 
-If you want to send data that is not form-encoded you can do it by passing a ``string``
-instead of a ``dict``. This data will be posted directly.
+If you want to send data that is not form-encoded you can do it by
+passing a :class:`str` instead of a :class:`dict`. This data will be
+posted directly.
 
 For example, the GitHub API v3 accepts JSON-Encoded POST/PATCH data::
 
@@ -250,16 +267,17 @@ You can set the filename, content_type explicitly::
 
     >>> yield from aiohttp.request('post', url, data=data)
 
-If you pass a file object as data parameter, aiohttp will stream it to the server
-automatically. Check :class:`aiohttp.stream.StreamReader` for supported format
-information.
+If you pass a file object as data parameter, aiohttp will stream it to
+the server automatically. Check :class:`~aiohttp.streams.StreamReader`
+for supported format information.
 
 .. seealso:: :ref:`aiohttp-multipart`
+
 
 Streaming uploads
 -----------------
 
-aiohttp support multiple types of streaming uploads, which allows you to
+:mod:`aiohttp` supports multiple types of streaming uploads, which allows you to
 send large files without reading them into memory.
 
 As a simple case, simply provide a file-like object for your body::
@@ -269,7 +287,7 @@ As a simple case, simply provide a file-like object for your body::
     ...       'post', 'http://some.url/streamed', data=f)
 
 
-Or you can provide an ``asyncio`` coroutine that yields bytes objects::
+Or you can provide an :ref:`coroutine<coroutine>` that yields bytes objects::
 
    >>> @asyncio.coroutine
    ... def my_coroutine():
@@ -279,12 +297,13 @@ Or you can provide an ``asyncio`` coroutine that yields bytes objects::
    ...    yield chunk
 
 .. note::
-   It is not a standard ``asyncio`` coroutine as it yields values so it
+   It is not a standard :ref:`coroutine<coroutine>` as it yields values so it
    can not be used like ``yield from my_coroutine()``.
-   ``aiohttp`` internally handles such coroutines.
+   :mod:`aiohttp` internally handles such coroutines.
 
-Also it is possible to use a ``StreamReader`` object. Lets say we want to upload
-a file from another request and calculate the file sha1 hash::
+Also it is possible to use a :class:`~aiohttp.streams.StreamReader`
+object. Lets say we want to upload a file from another request and
+calculate the file sha1 hash::
 
    >>> def feed_stream(resp, stream):
    ...    h = hashlib.sha1()
@@ -301,13 +320,14 @@ a file from another request and calculate the file sha1 hash::
    >>> resp = aiohttp.request('get', 'http://httpbin.org/post')
    >>> stream = StreamReader()
    >>> asyncio.async(aiohttp.request(
-   ...     'post', 'http://httpbin.org/post', data=stream)
+   ...     'post', 'http://httpbin.org/post', data=stream))
 
    >>> file_hash = yield from feed_stream(resp, stream)
 
 
-Because the response content attribute is a StreamReader, you can chain get and
-post requests together::
+Because the response content attribute is a
+:class:`~aiohttp.streams.StreamReader`, you can chain get and post
+requests together::
 
    >>> r = yield from aiohttp.request('get', 'http://python.org')
    >>> yield from aiohttp.request('post',
@@ -315,18 +335,46 @@ post requests together::
    ...                            data=r.content)
 
 
-.. _aiohttp-client-keep-alive:
+.. _aiohttp-client-session:
 
-Keep-Alive and connection pooling
----------------------------------
+Keep-Alive, connection pooling and cookie sharing
+-------------------------------------------------
 
-By default aiohttp does not use connection pooling. To enable connection pooling
-you should use one of the ``connector`` objects. There are several of them.
-The most widely used is :class:`aiohttp.connector.TCPConnector`::
+To share cookies between multiple requests you can create an
+:class:`~aiohttp.client.ClientSession` object:
 
-  >>> conn = aiohttp.TCPConnector()
-  >>> r = yield from aiohttp.request(
-  ...     'get', 'http://python.org', connector=conn)
+    >>> session = aiohttp.ClientSession()
+    >>> yield from session.get(
+    ...     'http://httpbin.org/cookies/set/my_cookie/my_value')
+    >>> r = yield from session.get('http://httpbin.org/cookies')
+    >>> json = yield from r.json()
+    >>> json['cookies']['my_cookie']
+    'my_value'
+
+You also can set default headers for all session requests:
+
+    >>> session = aiohttp.ClientSession(
+    ...     headers={"Authorization": "Basic bG9naW46cGFzcw=="})
+    >>> r = yield from s.get("http://httpbin.org/headers")
+    >>> json = yield from r.json()
+    >>> json['headers']['Authorization']
+    'Basic bG9naW46cGFzcw=='
+
+By default aiohttp does not use connection pooling. In other words
+multiple calls to :func:`~aiohttp.client.request` will start a new
+connection to host each.  :class:`~aiohttp.client.ClientSession`
+object will do connection pooling for you.
+
+
+Connectors
+----------
+
+To tweek or change *transport* layer of requests you can pass a custom
+**Connector** to ``aiohttp.request``. For example:
+
+    >>> conn = aiohttp.TCPConnector()
+    >>> r = yield from aiohttp.request(
+    ...     'get', 'http://python.org', connector=conn)
 
 
 SSL control for tcp sockets
@@ -431,8 +479,8 @@ So, we can access the headers using any capitalization we want::
     'application/json'
 
 
-Cookies
--------
+Response Cookies
+----------------
 
 If a response contains some Cookies, you can quickly access them::
 
@@ -442,37 +490,11 @@ If a response contains some Cookies, you can quickly access them::
     >>> r.cookies['example_cookie_name']
     'example_cookie_value'
 
-To send your own cookies to the server, you can use the ``cookies``
-parameter::
-
-    >>> url = 'http://httpbin.org/cookies'
-    >>> cookies = dict(cookies_are='working')
-
-    >>> r = yield from aiohttp.request('get', url, cookies=cookies)
-    >>> yield from r.text()
-    '{"cookies": {"cookies_are": "working"}}'
-
-With :ref:`connection pooling<aiohttp-client-keep-alive>` you can
-share cookies between requests:
-
-.. code-block:: python
-   :emphasize-lines: 1
-
-    >>> conn = aiohttp.connector.TCPConnector(share_cookies=True)
-    >>> r = yield from aiohttp.request(
-    ...     'get',
-    ...     'http://httpbin.org/cookies/set?k1=v1',
-    ...     connector=conn)
-    >>> yield from r.text()
-    '{"cookies": {"k1": "v1"}}'
-    >>> r = yield from aiohttp.request('get',
-    ...                                'http://httpbin.org/cookies',
-    ...                                connection=conn)
-    >>> yield from r.text()
-    '{"cookies": {"k1": "v1"}}'
-
 .. note::
-   By default ``share_cookies`` is set to ``False``.
+   Response cookies contain only values, that were in ``Set-Cookie`` headers 
+   of the **last** request in redirection chain. To gather cookies between all
+   redirection requests you can use :ref:`aiohttp.ClientSession 
+   <aiohttp-client-session>` object.
 
 
 Timeouts

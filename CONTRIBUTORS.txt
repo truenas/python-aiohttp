@@ -16,10 +16,14 @@ Ben Bader
 Brian C. Lane
 Dima Veselov
 Dimitar Dimitrov
+Dmytro Kuznetsov
+Elizabeth Leddy
 Erich Healy
 Eugene Chernyshov
+Frederik Gladhorn
 Georges Dubus
 Greg Holt
+Hugo Herter
 Junjie Tao
 Kay Zheng
 Kirill Klenov
@@ -37,6 +41,8 @@ Robert Lu
 Sebastian Hanula
 Simon Kennedy
 Stephen Granade
-W. Trevor King
+Taras Voinarovskyi
 Vaibhav Sagar
 Vitaly Haritonsky
+W. Trevor King
+Yannick Koechlin

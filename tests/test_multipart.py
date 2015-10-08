@@ -4,6 +4,7 @@ import io
 import os
 import unittest
 import unittest.mock as mock
+import zlib
 
 import aiohttp.multipart
 from aiohttp.helpers import parse_mimetype
@@ -553,8 +554,12 @@ class BodyPartWriterTestCase(unittest.TestCase):
         self.assertEqual(default, self.part._guess_content_type(b'foo'))
         self.assertEqual('text/plain; charset=utf-8',
                          self.part._guess_content_type('foo'))
-        with open(__file__, 'rb') as f:
-            self.assertEqual('text/x-python',
+
+        here = os.path.dirname(__file__)
+        filename = os.path.join(here, 'software_development_in_picture.jpg')
+
+        with open(filename, 'rb') as f:
+            self.assertEqual('image/jpeg',
                              self.part._guess_content_type(f))
 
     def test_guess_filename(self):
@@ -680,10 +685,11 @@ class BodyPartWriterTestCase(unittest.TestCase):
                          next(stream))
         self.assertEqual(b'\r\n\r\n', next(stream))
 
-        thing = (b'\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03\x0b\xc9\xccMU'
-                 b'(\xc9W\x08J\xcdI\xacP\x04\x00$\xfb\x9eV\x0e\x00\x00\x00'
-                 b'\r\n')
-        self.assertEqual(thing, b''.join(stream))
+        result = b''.join(stream)
+
+        decompressor = zlib.decompressobj(wbits=16+zlib.MAX_WBITS)
+        data = decompressor.decompress(result)
+        self.assertEqual(b'Time to Relax!', data)
         self.assertIsNone(next(stream, None))
 
     def test_serialize_with_content_encoding_deflate(self):
