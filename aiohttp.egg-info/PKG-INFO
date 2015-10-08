@@ -1,6 +1,6 @@
 Metadata-Version: 1.1
 Name: aiohttp
-Version: 0.17.2
+Version: 0.17.4
 Summary: http client/server for asyncio
 Home-page: https://github.com/KeepSafe/aiohttp/
 Author: Nikolay Kim
@@ -150,6 +150,24 @@ Description: http client/server for asyncio
         CHANGES
         =======
         
+        0.17.4 (09-29-2015)
+        -------------------
+        
+        - Properly parse URL path in aiohttp.web.Request #489
+        
+        - Add missing coroutine decorator, the client api is await-compatible now
+        
+        0.17.3 (08-28-2015)
+        ---------------------
+        
+        - Remove Content-Length header on compressed responses #450
+        
+        - Support Python 3.5
+        
+        - Improve performance of transport in-use list #472
+        
+        - Fix connection pooling #473
+        
         0.17.2 (08-11-2015)
         ---------------------
         
@@ -222,4 +240,5 @@ Classifier: Programming Language :: Python
 Classifier: Programming Language :: Python :: 3
 Classifier: Programming Language :: Python :: 3.3
 Classifier: Programming Language :: Python :: 3.4
+Classifier: Programming Language :: Python :: 3.5
 Classifier: Topic :: Internet :: WWW/HTTP

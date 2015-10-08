@@ -3,7 +3,7 @@ import json
 import os.path
 import socket
 import unittest
-from aiohttp import log, web, request, FormData
+from aiohttp import log, web, request, FormData, ClientSession
 from aiohttp.multidict import MultiDict
 from aiohttp.protocol import HttpVersion, HttpVersion10, HttpVersion11
 from aiohttp.streams import EOF_MARKER
@@ -59,6 +59,20 @@ class TestWebFunctional(unittest.TestCase):
             self.assertEqual(200, resp.status)
             txt = yield from resp.text()
             self.assertEqual('OK', txt)
+
+        self.loop.run_until_complete(go())
+
+    def test_handler_returns_not_response(self):
+
+        @asyncio.coroutine
+        def handler(request):
+            return 'abc'
+
+        @asyncio.coroutine
+        def go():
+            _, _, url = yield from self.create_server('GET', '/', handler)
+            resp = yield from request('GET', url, loop=self.loop)
+            self.assertEqual(500, resp.status)
 
         self.loop.run_until_complete(go())
 
@@ -881,6 +895,29 @@ class TestWebFunctional(unittest.TestCase):
             _, srv, url = yield from self.create_server('GET', '/', handler)
             resp = yield from request('GET', url+'?arg=', loop=self.loop)
             self.assertEqual(200, resp.status)
+            yield from resp.release()
+
+        self.loop.run_until_complete(go())
+
+    def test_stream_response_multiple_chunks(self):
+        @asyncio.coroutine
+        def handler(request):
+            resp = web.StreamResponse()
+            resp.enable_chunked_encoding()
+            resp.start(request)
+            resp.write(b'x')
+            resp.write(b'y')
+            resp.write(b'z')
+            return resp
+
+        @asyncio.coroutine
+        def go():
+            _, srv, url = yield from self.create_server('GET', '/', handler)
+            client = ClientSession(loop=self.loop)
+            resp = yield from client.get(url)
+            self.assertEqual(200, resp.status)
+            data = yield from resp.read()
+            self.assertEqual(b'xyz', data)
             yield from resp.release()
 
         self.loop.run_until_complete(go())
