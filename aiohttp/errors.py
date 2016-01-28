@@ -96,9 +96,6 @@ class HttpProcessingError(Exception):
 class WSServerHandshakeError(HttpProcessingError):
     """websocket server handshake error."""
 
-    def __init__(self, message, *, headers=None):
-        super().__init__(message=message, headers=headers)
-
 
 class HttpProxyError(HttpProcessingError):
     """Http proxy error.
@@ -186,3 +183,7 @@ class FingerprintMismatch(ClientConnectionError):
         return '<{} expected={} got={} host={} port={}>'.format(
             self.__class__.__name__, self.expected, self.got,
             self.host, self.port)
+
+
+class InvalidURL(Exception):
+    """Invalid URL."""

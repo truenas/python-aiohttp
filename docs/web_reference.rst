@@ -3,13 +3,9 @@
 HTTP Server Reference
 =====================
 
-.. highlight:: python
-
 .. module:: aiohttp.web
 
-.. versionchanged:: 0.12
-
-   The module was deeply refactored in backward incompatible manner.
+.. currentmodule:: aiohttp.web
 
 .. _aiohttp-web-request:
 
@@ -21,6 +17,13 @@ The Request object contains all the information about an incoming HTTP request.
 
 Every :ref:`handler<aiohttp-web-handler>` accepts a request instance as the
 first positional parameter.
+
+A :class:`Request` is a :obj:`dict`-like object, allowing it to be used for
+:ref:`sharing data<aiohttp-web-data-sharing>` among
+:ref:`aiohttp-web-middlewares` and :ref:`aiohttp-web-signals` handlers.
+
+Although :class:`Request` is :obj:`dict`-like object, it can't be duplicated
+like one using :meth:`Request.copy`.
 
 .. note::
 
@@ -94,7 +97,7 @@ first positional parameter.
 
       A multidict with all the variables in the query string.
 
-      Read-only :class:`~aiohttp.multidict.MultiDictProxy` lazy property.
+      Read-only :class:`~aiohttp.MultiDictProxy` lazy property.
 
       .. versionchanged:: 0.17
          A multidict contains empty items for query string like ``?arg=``.
@@ -104,7 +107,7 @@ first positional parameter.
       A multidict with all the variables in the POST parameters.
       POST property available only after :meth:`Request.post` coroutine call.
 
-      Read-only :class:`~aiohttp.multidict.MultiDictProxy`.
+      Read-only :class:`~aiohttp.MultiDictProxy`.
 
       :raises RuntimeError: if :meth:`Request.post` was not called \
                             before accessing the property.
@@ -113,7 +116,7 @@ first positional parameter.
 
       A case-insensitive multidict proxy with all headers.
 
-      Read-only :class:`~aiohttp.multidict.CIMultiDictProxy` property.
+      Read-only :class:`~aiohttp.CIMultiDictProxy` property.
 
    .. attribute:: keep_alive
 
@@ -154,7 +157,7 @@ first positional parameter.
 
       A multidict of all request's cookies.
 
-      Read-only :class:`~aiohttp.multidict.MultiDictProxy` lazy property.
+      Read-only :class:`~aiohttp.MultiDictProxy` lazy property.
 
    .. attribute:: content
 
@@ -250,9 +253,8 @@ first positional parameter.
       The method is just a boilerplate :ref:`coroutine <coroutine>`
       implemented as::
 
-         @asyncio.coroutine
-         def json(self, *, loader=json.loads):
-             body = yield from self.text()
+         async def json(self, *, loader=json.loads):
+             body = await self.text()
              return loader(body)
 
       :param callable loader: any :term:`callable` that accepts
@@ -270,7 +272,7 @@ first positional parameter.
       A :ref:`coroutine <coroutine>` that reads POST parameters from
       request body.
 
-      Returns :class:`~aiohttp.multidict.MultiDictProxy` instance filled
+      Returns :class:`~aiohttp.MultiDictProxy` instance filled
       with parsed data.
 
       If :attr:`method` is not *POST*, *PUT* or *PATCH* or
@@ -339,11 +341,10 @@ StreamResponse
    The most important thing you should know about *response* --- it
    is *Finite State Machine*.
 
-   That means you can do any manipulations with *headers*,
-   *cookies* and *status code* only before :meth:`start`
-   called.
+   That means you can do any manipulations with *headers*, *cookies*
+   and *status code* only before :meth:`prepare` coroutine is called.
 
-   Once you call :meth:`start` any change of
+   Once you call :meth:`prepare` any change of
    the *HTTP header* part will raise :exc:`RuntimeError` exception.
 
    Any :meth:`write` call after :meth:`write_eof` is also forbidden.
@@ -355,10 +356,18 @@ StreamResponse
                       parameter. Otherwise pass :class:`str` with
                       arbitrary *status* explanation..
 
+   .. attribute:: prepared
+
+      Read-only :class:`bool` property, ``True`` if :meth:`prepare` has
+      been called, ``False`` otherwise.
+
+      .. versionadded:: 0.18
+
    .. attribute:: started
 
-      Read-only :class:`bool` property, ``True`` if :meth:`start` has
-      been called, ``False`` otherwise.
+      Deprecated alias for :attr:`prepared`.
+
+      .. deprecated:: 0.18
 
    .. attribute:: status
 
@@ -429,11 +438,16 @@ StreamResponse
 
       .. versionadded:: 0.14
 
+      .. warning:: chunked encoding can be enabled for ``HTTP/1.1`` only.
+
+                   Setting up both :attr:`content_length` and chunked
+                   encoding is mutually exclusive.
+
       .. seealso:: :attr:`chunked`
 
    .. attribute:: headers
 
-      :class:`~aiohttp.multidict.CIMultiDict` instance
+      :class:`~aiohttp.CIMultiDict` instance
       for *outgoing* *HTTP headers*.
 
    .. attribute:: cookies
@@ -537,6 +551,37 @@ StreamResponse
       as an :class:`int` or a :class:`float` object, and the
       value ``None`` to unset the header.
 
+   .. attribute:: tcp_cork
+
+      :const:`~socket.TCP_CORK` (linux) or :const:`~socket.TCP_NOPUSH`
+      (FreeBSD and MacOSX) is applied to underlying transport if the
+      property is ``True``.
+
+      Use :meth:`set_tcp_cork` to assign new value to the property.
+
+      Default value is ``False``.
+
+   .. method:: set_tcp_cork(value)
+
+      Set :attr:`tcp_cork` property to *value*.
+
+      Clear :attr:`tcp_nodelay` if *value* is ``True``.
+
+   .. attribute:: tcp_nodelay
+
+      :const:`~socket.TCP_NODELAY` is applied to underlying transport
+      if the property is ``True``.
+
+      Use :meth:`set_tcp_nodelay` to assign new value to the property.
+
+      Default value is ``True``.
+
+   .. method:: set_tcp_nodelay(value)
+
+      Set :attr:`tcp_nodelay` property to *value*.
+
+      Clear :attr:`tcp_cork` if *value* is ``True``.
+
    .. method:: start(request)
 
       :param aiohttp.web.Request request: HTTP request object, that the
@@ -545,16 +590,37 @@ StreamResponse
       Send *HTTP header*. You should not change any header data after
       calling this method.
 
+      .. deprecated:: 0.18
+
+         Use :meth:`prepare` instead.
+
+      .. warning:: The method doesn't call
+         :attr:`web.Application.on_response_prepare` signal, use
+         :meth:`prepare` instead.
+
+   .. coroutinemethod:: prepare(request)
+
+      :param aiohttp.web.Request request: HTTP request object, that the
+                                          response answers.
+
+      Send *HTTP header*. You should not change any header data after
+      calling this method.
+
+      The coroutine calls :attr:`web.Application.on_response_prepare`
+      signal handlers.
+
+      .. versionadded:: 0.18
+
    .. method:: write(data)
 
       Send byte-ish data as the part of *response BODY*.
 
-      :meth:`start` must be called before.
+      :meth:`prepare` must be called before.
 
       Raises :exc:`TypeError` if data is not :class:`bytes`,
       :class:`bytearray` or :class:`memoryview` instance.
 
-      Raises :exc:`RuntimeError` if :meth:`start` has not been called.
+      Raises :exc:`RuntimeError` if :meth:`prepare` has not been called.
 
       Raises :exc:`RuntimeError` if :meth:`write_eof` has been called.
 
@@ -566,7 +632,7 @@ StreamResponse
       The intended use is to write::
 
           resp.write(data)
-          yield from resp.drain()
+          await resp.drain()
 
       Yielding from :meth:`drain` gives the opportunity for the loop
       to schedule the write operation and flush the buffer. It should
@@ -592,6 +658,7 @@ Response
 ^^^^^^^^
 
 .. class:: Response(*, status=200, headers=None, content_type=None, \
+                    charset=None, \
                     body=None, text=None)
 
    The most usable response class, inherited from :class:`StreamResponse`.
@@ -610,7 +677,13 @@ Response
 
    :param str text: response's BODY
 
-   :param str content_type: response's content type
+   :param str content_type: response's content type. ``'text/plain'``
+                       if *text* is passed also,
+                       ``'application/octet-stream'`` otherwise.
+
+   :param str charset: response's charset. ``'utf-8'`` if *text* is
+                       passed also, ``None`` otherwise.
+
 
    .. attribute:: body
 
@@ -644,12 +717,37 @@ WebSocketResponse
 .. class:: WebSocketResponse(*, timeout=10.0, autoclose=True, \
                              autoping=True, protocols=())
 
-   Class for handling server-side websockets.
+   Class for handling server-side websockets, inherited from
+   :class:`StreamResponse`.
 
-   After starting (by :meth:`start` call) the response you
+   After starting (by :meth:`prepare` call) the response you
    cannot use :meth:`~StreamResponse.write` method but should to
    communicate with websocket client by :meth:`send_str`,
    :meth:`receive` and others.
+
+   .. versionadded:: 0.19
+
+      The class supports ``async for`` statement for iterating over
+      incoming messages::
+
+         ws = web.WebSocketResponse()
+         await ws.prepare(request)
+
+         async for msg in ws:
+             print(msg.data)
+
+
+   .. coroutinemethod:: prepare(request)
+
+      Starts websocket. After the call you can use websocket methods.
+
+      :param aiohttp.web.Request request: HTTP request object, that the
+                                          response answers.
+
+
+      :raises HTTPException: if websocket handshake has failed.
+
+      .. versionadded:: 0.18
 
    .. method:: start(request)
 
@@ -661,12 +759,17 @@ WebSocketResponse
 
       :raises HTTPException: if websocket handshake has failed.
 
-   .. method:: can_start(request)
+      .. deprecated:: 0.18
+
+         Use :meth:`prepare` instead.
+
+   .. method:: can_prepare(request)
 
       Performs checks for *request* data to figure out if websocket
       can be started on the request.
 
-      If :meth:`can_start` call is success then :meth:`start` will success too.
+      If :meth:`can_prepare` call is success then :meth:`prepare` will
+      success too.
 
       :param aiohttp.web.Request request: HTTP request object, that the
                                           response answers.
@@ -678,6 +781,12 @@ WebSocketResponse
                ``None`` if client and server subprotocols are nit overlapping.
 
       .. note:: The method never raises exception.
+
+   .. method:: can_start(request)
+
+      Deprecated alias for :meth:`can_prepare`
+
+      .. deprecated:: 0.18
 
    .. attribute:: closed
 
@@ -803,6 +912,20 @@ WebSocketResponse
 
 .. seealso:: :ref:`WebSockets handling<aiohttp-web-websockets>`
 
+
+json_response
+-------------
+
+.. function:: json_response([data], *, text=None, body=None, \
+                            status=200, reason=None, headers=None, \
+                            content_type='application/json', \
+                            dumps=json.dumps)
+
+Return :class:`Response` with predefined ``'application/json'``
+content type and *data* encoded by *dumps* parameter
+(:func:`json.dumps` by default).
+
+
 .. _aiohttp-web-app-and-router:
 
 Application and Router
@@ -823,18 +946,20 @@ factory*. *RequestHandlerFactory* could be constructed with
 *Application* contains a *router* instance and a list of callbacks that
 will be called during application finishing.
 
-*Application* is a :class:`dict`, so you can use it as registry for
-arbitrary properties for later access from
-:ref:`handler<aiohttp-web-handler>` via :attr:`Request.app` property::
+:class:`Application` is a :obj:`dict`-like object, so you can use it for
+:ref:`sharing data<aiohttp-web-data-sharing>` globally by storing arbitrary
+properties for later access from a :ref:`handler<aiohttp-web-handler>` via the
+:attr:`Request.app` property::
 
    app = Application(loop=loop)
-   app['database'] = yield from aiopg.create_engine(**db_config)
+   app['database'] = await aiopg.create_engine(**db_config)
 
-   @asyncio.coroutine
-   def handler(request):
-       with (yield from request.app['database']) as conn:
+   async def handler(request):
+       with (await request.app['database']) as conn:
            conn.execute("DELETE * FROM table")
 
+Although :class:`Application` is a :obj:`dict`-like object, it can't be
+duplicated like one using :meth:`Application.copy`.
 
 .. class:: Application(*, loop=None, router=None, logger=<default>, \
                        middlewares=(), **kwargs)
@@ -873,6 +998,18 @@ arbitrary properties for later access from
 
       :ref:`event loop<asyncio-event-loop>` used for processing HTTP requests.
 
+   .. attribute:: on_response_prepare
+
+      A :class:`~aiohttp.signals.Signal` that is fired at the beginning
+      of :meth:`StreamResponse.prepare` with parameters *request* and
+      *response*. It can be used, for example, to add custom headers to each
+      response before sending.
+
+      Signal handlers should have the following signature::
+
+          async def handler(request, response):
+              pass
+
    .. method:: make_handler(**kwargs)
 
       Creates HTTP protocol factory for handling requests.
@@ -890,8 +1027,8 @@ arbitrary properties for later access from
          # setup route table
          # app.router.add_route(...)
 
-         yield from loop.create_server(app.make_handler(),
-                                       '0.0.0.0', 8080)
+         await loop.create_server(app.make_handler(),
+                                  '0.0.0.0', 8080)
 
    .. coroutinemethod:: finish()
 
@@ -916,13 +1053,13 @@ arbitrary properties for later access from
       last in, first out order.
 
       *func* may be either regular function or :ref:`coroutine<coroutine>`,
-      :meth:`finish` will un-yield (`yield from`) the later.
+      :meth:`finish` will un-yield (`await`) the later.
 
    .. note::
 
-      Application object has :attr:`route` attribute but has no
+      Application object has :attr:`router` attribute but has no
       ``add_route()`` method. The reason is: we want to support
-      different route implementations (even maybe not url-matching
+      different router implementations (even maybe not url-matching
       based but traversal ones).
 
       For sake of that fact we have very trivial ABC for
@@ -939,7 +1076,7 @@ RequestHandlerFactory
 ^^^^^^^^^^^^^^^^^^^^^
 
 RequestHandlerFactory is responsible for creating HTTP protocol objects that
-can handle http connections.
+can handle HTTP connections.
 
    .. attribute:: connections
 
@@ -1014,17 +1151,32 @@ Router is any object that implements :class:`AbstractRouter` interface.
       :returns: new :class:`PlainRoute` or :class:`DynamicRoute` instance.
 
    .. method:: add_static(prefix, path, *, name=None, expect_handler=None, \
-                          chunk_size=256*1024, response_factory=None)
+                          chunk_size=256*1024, response_factory=StreamResponse)
 
-      Adds router for returning static files.
+      Adds a router and a handler for returning static files.
 
-      Useful for handling static content like images, javascript and css files.
+      Useful for serving static content like images, javascript and css files.
+
+      On platforms that support it, the handler will transfer files more
+      efficiently using the ``sendfile`` system call.
+
+      In some situations it might be necessary to avoid using the ``sendfile``
+      system call even if the platform supports it. This can be accomplished by
+      by setting environment variable ``AIOHTTP_NOSENDFILE=1``.
 
       .. warning::
 
          Use :meth:`add_static` for development only. In production,
          static content should be processed by web servers like *nginx*
          or *apache*.
+
+      .. versionchanged:: 0.18.0
+         Transfer files using the ``sendfile`` system call on supported
+         platforms.
+
+      .. versionchanged:: 0.19.0
+         Disable ``sendfile`` by setting environment variable
+         ``AIOHTTP_NOSENDFILE=1``
 
       :param str prefix: URL path prefix for handled static files
 
@@ -1036,7 +1188,7 @@ Router is any object that implements :class:`AbstractRouter` interface.
       :param coroutine expect_handler: optional *expect* header handler.
 
       :param int chunk_size: size of single chunk for file
-                             downloading, 64Kb by default.
+                             downloading, 256Kb by default.
 
                              Increasing *chunk_size* parameter to,
                              say, 1Mb may increase file downloading
@@ -1080,6 +1232,47 @@ Router is any object that implements :class:`AbstractRouter` interface.
          The method don't raise :exc:`HTTPNotFound` and
          :exc:`HTTPMethodNotAllowed` anymore.
 
+   .. method:: routes()
+
+      The method returns a *view* for *all* registered routes.
+
+      The view is an object that allows to:
+
+      1. Get size of the router table::
+
+           len(app.router.routes())
+
+      2. Iterate over registered routes::
+
+           for route in app.router.routes():
+               print(route)
+
+      3. Make a check if the route is registered in the router table::
+
+           route in app.router.routes()
+
+      .. versionadded:: 0.18
+
+   .. method:: named_routes()
+
+      Returns a :obj:`dict`-like :class:`types.MappingProxyType` *view* over
+      *all* named routes.
+
+      The view maps every named route's :attr:`Route.name` attribute to the
+      :class:`Route`. It supports the usual :obj:`dict`-like operations, except
+      for any mutable operations (i.e. it's **read-only**)::
+
+          len(app.router.named_routes())
+
+          for name, route in app.router.named_routes().items():
+              print(name, route)
+
+          "route_name" in app.router.named_routes()
+
+          app.router.named_routes()["route_name"]
+
+      .. versionadded:: 0.19
+
 
 .. _aiohttp-web-route:
 
@@ -1098,12 +1291,10 @@ passing it into *template engine* for example::
 
    url = app.router['route_name'].url(query={'a': 1, 'b': 2})
 
-There are three concrete route classes:* :class:`DynamicRoute` for
-urls with :ref:`variable pathes<aiohttp-web-variable-handler>` spec.
-
+There are three concrete route classes:
 
 * :class:`PlainRoute` for urls without :ref:`variable
-  pathes<aiohttp-web-variable-handler>`
+  pathes<aiohttp-web-variable-handler>` spec.
 
 * :class:`DynamicRoute` for urls with :ref:`variable
   pathes<aiohttp-web-variable-handler>` spec.
@@ -1154,7 +1345,7 @@ urls with :ref:`variable pathes<aiohttp-web-variable-handler>` spec.
    Construct url, doesn't accepts extra parameters::
 
       >>> route.url(query={'d': 1, 'e': 2})
-      '/a/b/c/?d=1&e=2'``
+      '/a/b/c/?d=1&e=2'
 
 .. class:: DynamicRoute
 
@@ -1217,14 +1408,56 @@ In general the result may be any object derived from
    :class:`Route` instance for url matching.
 
 
+View
+^^^^
+
+.. class:: View(request)
+
+   Inherited from :class:`AbstractView`.
+
+   Base class for class based views. Implementations should derive from
+   :class:`View` and override methods for handling HTTP verbs like
+   ``get()`` or ``post()``::
+
+       class MyView(View):
+
+           async def get(self):
+               resp = await get_response(self.request)
+               return resp
+
+           async def post(self):
+               resp = await post_response(self.request)
+               return resp
+
+       app.router.add_route('*', '/view', MyView)
+
+   The view raises *405 Method Not allowed*
+   (:class:`HTTPMEthodNowAllowed`) if requested web verb is not
+   supported.
+
+   :param request: instance of :class:`Request` that has initiated a view
+                   processing.
+
+
+   .. attribute:: request
+
+      Request sent to view's constructor, read-only property.
+
+
+   Overridable coroutine methods: ``connect()``, ``delete()``,
+   ``get()``, ``head()``, ``options()``, ``patch()``, ``post()``,
+   ``put()``, ``trace()``.
+
+.. seealso:: :ref:`aiohttp-web-class-based-views`
+
 
 Utilities
 ---------
 
 .. class:: FileField
 
-   A :func:`~collections.namedtuple` that is returned as multidict value
-   by :meth:`Request.POST` if field is uploaded file.
+   A :class:`~collections.namedtuple` instance that is returned as
+   multidict value by :meth:`Request.POST` if field is uploaded file.
 
    .. attribute:: name
 
@@ -1254,8 +1487,14 @@ Constants
 
    .. attribute:: deflate
 
+      *DEFLATE compression*
+
    .. attribute:: gzip
 
+      *GZIP comression*
+
    .. attribute:: identity
+
+      *no comression*
 
 .. disqus::
