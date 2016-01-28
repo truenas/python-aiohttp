@@ -8,3 +8,6 @@ export PYBUILD_TEST_ARGS={dir}/tests
 %:
 	dh $@ --with python3,sphinxdoc --buildsystem pybuild
 
+override_dh_auto_clean:
+	rm -rf .cache
+	dh_auto_clean
