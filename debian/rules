@@ -4,6 +4,8 @@ export PYBUILD_NAME = aiohttp
 # enable pytest also here to make backports easier
 export PYBUILD_TEST_PYTEST=1
 export PYBUILD_TEST_ARGS={dir}/tests
+export PYBUILD_TEST_ARGS_python3.5=$(PYBUILD_TEST_ARGS) -k-test_client_functional_oldstyle
+export PYBUILD_TEST_ARGS_python3.5-dbg=$(PYBUILD_TEST_ARGS_python3.5)
 
 %:
 	dh $@ --with python3,sphinxdoc --buildsystem pybuild
