@@ -1,5 +1,3 @@
-__all__ = ('ContentCoding', 'Request', 'StreamResponse', 'Response')
-
 import asyncio
 import binascii
 import cgi
@@ -24,8 +22,14 @@ from .multidict import (CIMultiDictProxy,
                         CIMultiDict,
                         MultiDictProxy,
                         MultiDict)
-from .protocol import Response as ResponseImpl, HttpVersion10
+from .protocol import Response as ResponseImpl, HttpVersion10, HttpVersion11
 from .streams import EOF_MARKER
+
+
+__all__ = (
+    'ContentCoding', 'Request', 'StreamResponse', 'Response',
+    'json_response'
+)
 
 
 sentinel = object()
@@ -124,7 +128,7 @@ class Request(dict, HeadersMixin):
 
         self._secure_proxy_ssl_header = secure_proxy_ssl_header
 
-    @property
+    @reify
     def scheme(self):
         """A string representing the scheme of the request.
 
@@ -388,6 +392,9 @@ class Request(dict, HeadersMixin):
         self._post = MultiDictProxy(out)
         return self._post
 
+    def copy(self):
+        raise NotImplementedError
+
     def __repr__(self):
         return "<{} {} {} >".format(self.__class__.__name__,
                                     self.method, self.path)
@@ -414,6 +421,8 @@ class StreamResponse(HeadersMixin):
         self._req = None
         self._resp_impl = None
         self._eof_sent = False
+        self._tcp_nodelay = True
+        self._tcp_cork = False
 
         if headers is not None:
             self._headers.extend(headers)
@@ -424,8 +433,13 @@ class StreamResponse(HeadersMixin):
             self.headers.add(hdrs.SET_COOKIE, value)
 
     @property
-    def started(self):
+    def prepared(self):
         return self._resp_impl is not None
+
+    @property
+    def started(self):
+        warnings.warn('use Response.prepared instead', DeprecationWarning)
+        return self.prepared
 
     @property
     def status(self):
@@ -498,10 +512,14 @@ class StreamResponse(HeadersMixin):
             c['expires'] = expires
         if domain is not None:
             c['domain'] = domain
+
         if max_age is not None:
             c['max-age'] = max_age
-        if path is not None:
-            c['path'] = path
+        elif 'max-age' in c:
+            del c['max-age']
+
+        c['path'] = path
+
         if secure is not None:
             c['secure'] = secure
         if httponly is not None:
@@ -588,6 +606,36 @@ class StreamResponse(HeadersMixin):
         elif isinstance(value, str):
             self.headers[hdrs.LAST_MODIFIED] = value
 
+    @property
+    def tcp_nodelay(self):
+        return self._tcp_nodelay
+
+    def set_tcp_nodelay(self, value):
+        value = bool(value)
+        self._tcp_nodelay = value
+        if value:
+            self._tcp_cork = False
+        if self._resp_impl is None:
+            return
+        if value:
+            self._resp_impl.transport.set_tcp_cork(False)
+        self._resp_impl.transport.set_tcp_nodelay(value)
+
+    @property
+    def tcp_cork(self):
+        return self._tcp_cork
+
+    def set_tcp_cork(self, value):
+        value = bool(value)
+        self._tcp_cork = value
+        if value:
+            self._tcp_nodelay = False
+        if self._resp_impl is None:
+            return
+        if value:
+            self._resp_impl.transport.set_tcp_nodelay(False)
+        self._resp_impl.transport.set_tcp_cork(value)
+
     def _generate_content_type_header(self, CONTENT_TYPE=hdrs.CONTENT_TYPE):
         params = '; '.join("%s=%s" % i for i in self._content_dict.items())
         if params:
@@ -607,27 +655,40 @@ class StreamResponse(HeadersMixin):
             return None
 
     def _start_compression(self, request):
-        def start(coding):
+        def _start(coding):
             if coding != ContentCoding.identity:
                 self.headers[hdrs.CONTENT_ENCODING] = coding.value
                 self._resp_impl.add_compression_filter(coding.value)
                 self.content_length = None
 
         if self._compression_force:
-            start(self._compression_force)
+            _start(self._compression_force)
         else:
             accept_encoding = request.headers.get(
                 hdrs.ACCEPT_ENCODING, '').lower()
             for coding in ContentCoding:
                 if coding.value in accept_encoding:
-                    start(coding)
+                    _start(coding)
                     return
 
     def start(self, request):
+        warnings.warn('use .prepare(request) instead', DeprecationWarning)
         resp_impl = self._start_pre_check(request)
         if resp_impl is not None:
             return resp_impl
 
+        return self._start(request)
+
+    @asyncio.coroutine
+    def prepare(self, request):
+        resp_impl = self._start_pre_check(request)
+        if resp_impl is not None:
+            return resp_impl
+        yield from request.app.on_response_prepare.send(request, self)
+
+        return self._start(request)
+
+    def _start(self, request):
         self._req = request
         keep_alive = self._keep_alive
         if keep_alive is None:
@@ -647,6 +708,10 @@ class StreamResponse(HeadersMixin):
             self._start_compression(request)
 
         if self._chunked:
+            if request.version != HttpVersion11:
+                raise RuntimeError("Using chunked encoding is forbidden "
+                                   "for HTTP/{0.major}.{0.minor}".format(
+                                       request.version))
             resp_impl.enable_chunked_encoding()
             if self._chunk_size:
                 resp_impl.add_chunking_filter(self._chunk_size)
@@ -655,6 +720,8 @@ class StreamResponse(HeadersMixin):
         for key, val in headers:
             resp_impl.add_header(key, val)
 
+        resp_impl.transport.set_tcp_nodelay(self._tcp_nodelay)
+        resp_impl.transport.set_tcp_cork(self._tcp_cork)
         resp_impl.send_headers()
         return resp_impl
 
@@ -700,8 +767,10 @@ class StreamResponse(HeadersMixin):
 class Response(StreamResponse):
 
     def __init__(self, *, body=None, status=200,
-                 reason=None, text=None, headers=None, content_type=None):
+                 reason=None, text=None, headers=None, content_type=None,
+                 charset=None):
         super().__init__(status=status, reason=reason, headers=headers)
+        self.set_tcp_cork(True)
 
         if body is not None and text is not None:
             raise ValueError("body and text are not allowed together.")
@@ -714,16 +783,31 @@ class Response(StreamResponse):
                                     type(text))
                 if content_type is None:
                     content_type = 'text/plain'
+                elif ";" in content_type:
+                    raise ValueError('charset must not be in content_type '
+                                     'argument')
+                charset = charset or 'utf-8'
                 self.headers[hdrs.CONTENT_TYPE] = (
-                    content_type + '; charset=utf-8')
+                    content_type + '; charset=%s' % charset)
                 self._content_type = content_type
-                self._content_dict = {'charset': 'utf-8'}
-                self.body = text.encode('utf-8')
+                self._content_dict = {'charset': charset}
+                self.body = text.encode(charset)
             else:
                 self.text = text
+                if content_type or charset:
+                    raise ValueError("Passing both Content-Type header and "
+                                     "content_type or charset params "
+                                     "is forbidden")
         else:
+            if hdrs.CONTENT_TYPE in self.headers:
+                if content_type or charset:
+                    raise ValueError("Passing both Content-Type header and "
+                                     "content_type or charset params "
+                                     "is forbidden")
             if content_type:
                 self.content_type = content_type
+            if charset:
+                self.charset = charset
             if body is not None:
                 self.body = body
             else:
@@ -763,7 +847,24 @@ class Response(StreamResponse):
 
     @asyncio.coroutine
     def write_eof(self):
-        body = self._body
-        if body is not None:
-            self.write(body)
+        try:
+            body = self._body
+            if body is not None:
+                self.write(body)
+        finally:
+            self.set_tcp_nodelay(True)
         yield from super().write_eof()
+
+
+def json_response(data=sentinel, *, text=None, body=None, status=200,
+                  reason=None, headers=None, content_type='application/json',
+                  dumps=json.dumps):
+    if data is not sentinel:
+        if text or body:
+            raise ValueError(
+                'only one of data, text, or body should be specified'
+            )
+        else:
+            text = dumps(data)
+    return Response(text=text, body=body, status=status, reason=reason,
+                    headers=headers, content_type=content_type)

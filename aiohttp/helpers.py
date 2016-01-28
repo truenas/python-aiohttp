@@ -1,14 +1,25 @@
 """Various helper functions"""
+
+import asyncio
 import base64
+import datetime
+import functools
 import io
 import os
-import urllib.parse
+import re
+from urllib.parse import quote, urlencode
 from collections import namedtuple
-from wsgiref.handlers import format_date_time
 
 from . import hdrs, multidict
+from .errors import InvalidURL
 
-__all__ = ('BasicAuth', 'FormData', 'parse_mimetype')
+try:
+    from asyncio import ensure_future
+except ImportError:
+    ensure_future = asyncio.async
+
+
+__all__ = ('BasicAuth', 'FormData', 'parse_mimetype', 'Timeout')
 
 
 class BasicAuth(namedtuple('BasicAuth', ['login', 'password', 'encoding'])):
@@ -126,7 +137,7 @@ class FormData:
         for type_options, _, value in self._fields:
             data.append((type_options['name'], value))
 
-        data = urllib.parse.urlencode(data, doseq=True)
+        data = urlencode(data, doseq=True)
         return data.encode(encoding)
 
     def _gen_form_data(self, *args, **kwargs):
@@ -197,97 +208,162 @@ def guess_filename(obj, default=None):
     return default
 
 
-def parse_remote_addr(forward):
-    if isinstance(forward, str):
-        # we only took the last one
-        # http://en.wikipedia.org/wiki/X-Forwarded-For
-        if ',' in forward:
-            forward = forward.rsplit(',', 1)[-1].strip()
+class AccessLogger:
+    """Helper object to log access.
 
-        # find host and port on ipv6 address
-        if '[' in forward and ']' in forward:
-            host = forward.split(']')[0][1:].lower()
-        elif ':' in forward and forward.count(':') == 1:
-            host = forward.split(':')[0].lower()
-        else:
-            host = forward
+    Usage:
+        log = logging.getLogger("spam")
+        log_format = "%a %{User-Agent}i"
+        access_logger = AccessLogger(log, log_format)
+        access_logger.log(message, environ, response, transport, time)
 
-        forward = forward.split(']')[-1]
-        if ':' in forward and forward.count(':') == 1:
-            port = forward.split(':', 1)[1]
-        else:
-            port = 80
+    Format:
+        %%  The percent sign
+        %a  Remote IP-address (IP-address of proxy if using reverse proxy)
+        %t  Time when the request was started to process
+        %P  The process ID of the child that serviced the request
+        %r  First line of request
+        %s  Response status code
+        %b  Size of response in bytes, excluding HTTP headers
+        %O  Bytes sent, including headers
+        %T  Time taken to serve the request, in seconds
+        %Tf Time taken to serve the request, in seconds with floating fraction
+            in .06f format
+        %D  Time taken to serve the request, in microseconds
+        %{FOO}i  request.headers['FOO']
+        %{FOO}o  response.headers['FOO']
+        %{FOO}e  os.environ['FOO']
 
-        remote = (host, port)
-    else:
-        remote = forward
+    """
 
-    return remote[0], str(remote[1])
+    LOG_FORMAT = '%a %l %u %t "%r" %s %b "%{Referrer}i" "%{User-Agent}i"'
+    FORMAT_RE = re.compile(r'%(\{([A-Za-z\-]+)\}([ioe])|[atPrsbOD]|Tf?)')
+    CLEANUP_RE = re.compile(r'(%[^s])')
+    _FORMAT_CACHE = {}
 
+    def __init__(self, logger, log_format=LOG_FORMAT):
+        """Initialise the logger.
 
-def atoms(message, environ, response, transport, request_time):
-    """Gets atoms for log formatting."""
-    if message:
-        r = '{} {} HTTP/{}.{}'.format(
-            message.method, message.path,
-            message.version[0], message.version[1])
-        headers = message.headers
-    else:
-        r = ''
-        headers = {}
+        :param logger: logger object to be used for logging
+        :param log_format: apache compatible log format
 
-    if transport is not None:
-        remote_addr = parse_remote_addr(
-            transport.get_extra_info('addr', '127.0.0.1'))
-    else:
-        remote_addr = ('',)
+        """
+        self.logger = logger
+        _compiled_format = AccessLogger._FORMAT_CACHE.get(log_format)
+        if not _compiled_format:
+            _compiled_format = self.compile_format(log_format)
+            AccessLogger._FORMAT_CACHE[log_format] = _compiled_format
+        self._log_format, self._methods = _compiled_format
 
-    atoms = {
-        'h': remote_addr[0],
-        'l': '-',
-        'u': '-',
-        't': format_date_time(None),
-        'r': r,
-        's': str(getattr(response, 'status', '')),
-        'b': str(getattr(response, 'output_length', '')),
-        'f': headers.get(hdrs.REFERER, '-'),
-        'a': headers.get(hdrs.USER_AGENT, '-'),
-        'T': str(int(request_time)),
-        'D': str(request_time).split('.', 1)[-1][:5],
-        'p': "<%s>" % os.getpid()
-    }
+    def compile_format(self, log_format):
+        """Translate log_format into form usable by modulo formatting
 
-    return atoms
+        All known atoms will be replaced with %s
+        Also methods for formatting of those atoms will be added to
+        _methods in apropriate order
 
+        For example we have log_format = "%a %t"
+        This format will be translated to "%s %s"
+        Also contents of _methods will be
+        [self._format_a, self._format_t]
+        These method will be called and results will be passed
+        to translated string format.
 
-class SafeAtoms(dict):
-    """Copy from gunicorn"""
+        Each _format_* method receive 'args' which is list of arguments
+        given to self.log
 
-    def __init__(self, atoms, i_headers, o_headers):
-        dict.__init__(self)
+        Exceptions are _format_e, _format_i and _format_o methods which
+        also receive key name (by functools.partial)
 
-        self._i_headers = i_headers
-        self._o_headers = o_headers
+        """
 
-        for key, value in atoms.items():
-            self[key] = value.replace('"', '\\"')
+        log_format = log_format.replace("%l", "-")
+        log_format = log_format.replace("%u", "-")
+        methods = []
 
-    def __getitem__(self, k):
-        if k.startswith('{'):
-            if k.endswith('}i'):
-                headers = self._i_headers
-            elif k.endswith('}o'):
-                headers = self._o_headers
+        for atom in self.FORMAT_RE.findall(log_format):
+            if atom[1] == '':
+                methods.append(getattr(AccessLogger, '_format_%s' % atom[0]))
             else:
-                headers = None
+                m = getattr(AccessLogger, '_format_%s' % atom[2])
+                methods.append(functools.partial(m, atom[1]))
+        log_format = self.FORMAT_RE.sub(r'%s', log_format)
+        log_format = self.CLEANUP_RE.sub(r'%\1', log_format)
+        return log_format, methods
 
-            if headers is not None:
-                return headers.get(k[1:-2], '-')
+    @staticmethod
+    def _format_e(key, args):
+        return (args[1] or {}).get(multidict.upstr(key), '-')
 
-        if k in self:
-            return super(SafeAtoms, self).__getitem__(k)
-        else:
+    @staticmethod
+    def _format_i(key, args):
+        return args[0].headers.get(multidict.upstr(key), '-')
+
+    @staticmethod
+    def _format_o(key, args):
+        return args[2].headers.get(multidict.upstr(key), '-')
+
+    @staticmethod
+    def _format_a(args):
+        return args[3].get_extra_info('peername')[0]
+
+    @staticmethod
+    def _format_t(args):
+        return datetime.datetime.utcnow().strftime('[%d/%b/%Y:%H:%M:%S +0000]')
+
+    @staticmethod
+    def _format_P(args):
+        return "<%s>" % os.getpid()
+
+    @staticmethod
+    def _format_r(args):
+        msg = args[0]
+        if not msg:
             return '-'
+        return '%s %s HTTP/%s.%s' % tuple((msg.method,
+                                           msg.path) + msg.version)
+
+    @staticmethod
+    def _format_s(args):
+        return args[2].status
+
+    @staticmethod
+    def _format_b(args):
+        return args[2].body_length
+
+    @staticmethod
+    def _format_O(args):
+        return args[2].output_length
+
+    @staticmethod
+    def _format_T(args):
+        return round(args[4])
+
+    @staticmethod
+    def _format_Tf(args):
+        return '%06f' % args[4]
+
+    @staticmethod
+    def _format_D(args):
+        return round(args[4] * 1000000)
+
+    def _format_line(self, args):
+        return tuple(m(args) for m in self._methods)
+
+    def log(self, message, environ, response, transport, time):
+        """Log access.
+
+        :param message: Request object. May be None.
+        :param environ: Environment dict. May be None.
+        :param response: Response object.
+        :param transport: Tansport object.
+        :param float time: Time taken to serve the request.
+        """
+        try:
+            self.logger.info(self._log_format % self._format_line(
+                [message, environ, response, transport, time]))
+        except Exception:
+            self.logger.exception("Error in logging")
 
 
 _marker = object()
@@ -322,3 +398,94 @@ class reify:
 
     def __set__(self, inst, value):
         raise AttributeError("reified property is read-only")
+
+
+# The unreserved URI characters (RFC 3986)
+UNRESERVED_SET = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz" +
+    "0123456789-._~")
+
+
+def unquote_unreserved(uri):
+    """Un-escape any percent-escape sequences in a URI that are unreserved
+    characters. This leaves all reserved, illegal and non-ASCII bytes encoded.
+    """
+    parts = uri.split('%')
+    for i in range(1, len(parts)):
+        h = parts[i][0:2]
+        if len(h) == 2 and h.isalnum():
+            try:
+                c = chr(int(h, 16))
+            except ValueError:
+                raise InvalidURL("Invalid percent-escape sequence: '%s'" % h)
+
+            if c in UNRESERVED_SET:
+                parts[i] = c + parts[i][2:]
+            else:
+                parts[i] = '%' + parts[i]
+        else:
+            parts[i] = '%' + parts[i]
+    return ''.join(parts)
+
+
+def requote_uri(uri):
+    """Re-quote the given URI.
+
+    This function passes the given URI through an unquote/quote cycle to
+    ensure that it is fully and consistently quoted.
+    """
+    safe_with_percent = "!#$%&'()*+,/:;=?@[]~"
+    safe_without_percent = "!#$&'()*+,/:;=?@[]~"
+    try:
+        # Unquote only the unreserved characters
+        # Then quote only illegal characters (do not quote reserved,
+        # unreserved, or '%')
+        return quote(unquote_unreserved(uri), safe=safe_with_percent)
+    except InvalidURL:
+        # We couldn't unquote the given URI, so let's try quoting it, but
+        # there may be unquoted '%'s in the URI. We need to make sure they're
+        # properly quoted so they do not cause issues elsewhere.
+        return quote(uri, safe=safe_without_percent)
+
+
+class Timeout:
+    """Timeout context manager.
+
+    Useful in cases when you want to apply timeout logic around block
+    of code or in cases when asyncio.wait_for is not suitable. For example:
+
+    >>> with aiohttp.Timeout(0.001):
+    >>>     async with aiohttp.get('https://github.com') as r:
+    >>>         await r.text()
+
+
+    :param timeout: timeout value in seconds
+    :param loop: asyncio compatible event loop
+    """
+    def __init__(self, timeout, *, loop=None):
+        self._timeout = timeout
+        if loop is None:
+            loop = asyncio.get_event_loop()
+        self._loop = loop
+        self._task = None
+        self._cancelled = False
+        self._cancel_handler = None
+
+    def __enter__(self):
+        self._task = asyncio.Task.current_task(loop=self._loop)
+        if self._task is None:
+            raise RuntimeError('Timeout context manager should be used '
+                               'inside a task')
+        self._cancel_handler = self._loop.call_later(
+            self._timeout, self._cancel_task)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is asyncio.CancelledError and self._cancelled:
+            self._task = None
+            raise asyncio.TimeoutError
+        self._cancel_handler.cancel()
+        self._task = None
+
+    def _cancel_task(self):
+        self._cancelled = self._task.cancel()

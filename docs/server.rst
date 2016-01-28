@@ -3,8 +3,6 @@
 Low-level HTTP Server
 =====================
 
-.. highlight:: python
-
 .. currentmodule:: aiohttp.server
 
 .. note::
@@ -26,15 +24,14 @@ which must be a coroutine to handle requests asynchronously
 
       import aiohttp
       import aiohttp.server
-      from aiohttp.multidict import MultiDict
+      from aiohttp import MultiDict
 
 
       import asyncio
 
       class HttpRequestHandler(aiohttp.server.ServerHttpProtocol):
 
-        @asyncio.coroutine
-        def handle_request(self, message, payload):
+        async def handle_request(self, message, payload):
             response = aiohttp.Response(
                 self.writer, 200, http_version=message.version
             )
@@ -42,7 +39,7 @@ which must be a coroutine to handle requests asynchronously
             response.add_header('Content-Length', '18')
             response.send_headers()
             response.write(b'<h1>It Works!</h1>')
-            yield from response.write_eof()
+            await response.write_eof()
 
 The next step is to create a loop and register your handler within a server.
 :exc:`KeyboardInterrupt` exception handling is necessary so you can stop
@@ -83,12 +80,11 @@ params.  However aiohttp does provide a nice
 
     from urllib.parse import urlparse, parse_qsl
 
-    from aiohttp.multidict import MultiDict
+    from aiohttp import MultiDict
 
     class HttpRequestHandler(aiohttp.server.ServerHttpProtocol):
 
-        @asyncio.coroutine
-        def handle_request(self, message, payload):
+        async def handle_request(self, message, payload):
             response = aiohttp.Response(
                 self.writer, 200, http_version=message.version
             )
@@ -107,16 +103,15 @@ GET params.
 
     from urllib.parse import urlparse, parse_qsl
 
-    from aiohttp.multidict import MultiDict
+    from aiohttp import MultiDict
 
     class HttpRequestHandler(aiohttp.server.ServerHttpProtocol):
 
-        @asyncio.coroutine
-        def handle_request(self, message, payload):
+        async def handle_request(self, message, payload):
             response = aiohttp.Response(
                 self.writer, 200, http_version=message.version
             )
-            data = yield from payload.read()
+            data = await payload.read()
             post_params = MultiDict(parse_qsl(data))
             print("Passed in POST", post_params)
 

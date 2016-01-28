@@ -1,433 +1,370 @@
-# -*- coding: utf-8 -*-
-"""Tests for aiohttp/client.py"""
-
 import asyncio
+import contextlib
 import gc
-import unittest
+import re
+import types
 from unittest import mock
-import sys
 
 import aiohttp
+import pytest
 from aiohttp.client import ClientSession
-from aiohttp.multidict import MultiDict, CIMultiDict, CIMultiDictProxy
 from aiohttp.connector import BaseConnector, TCPConnector
-from aiohttp.client_reqrep import ClientRequest, ClientResponse
-from http.cookies import SimpleCookie
+from aiohttp.multidict import CIMultiDict, MultiDict
 
 
-PY_341 = sys.version_info >= (3, 4, 1)
+@pytest.fixture
+def connector(loop):
+    conn = BaseConnector(loop=loop)
+    transp = mock.Mock()
+    conn._conns['a'] = [(transp, 'proto', 123)]
+    return conn
 
 
-class TestClientSession(unittest.TestCase):
+@pytest.yield_fixture
+def create_session(loop):
+    session = None
 
-    maxDiff = None
-
-    def setUp(self):
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(None)
-        self.run = self.loop.run_until_complete
-
-    def tearDown(self):
-        self.loop.close()
-
-    def make_open_connector(self):
-        conn = BaseConnector(loop=self.loop)
-        transp = unittest.mock.Mock()
-        conn._conns['a'] = [(transp, 'proto', 123)]
-        return conn
-
-    def test_init_headers_simple_dict(self):
-        session = ClientSession(
-            headers={
-                "h1": "header1",
-                "h2": "header2"
-            }, loop=self.loop)
-        self.assertEqual(
-            set(session._default_headers),
-            set([("h1", "header1"),
-                 ("h2", "header2")]))
+    def maker(*args, **kwargs):
+        nonlocal session
+        session = ClientSession(*args, loop=loop, **kwargs)
+        return session
+    yield maker
+    if session is not None:
         session.close()
 
-    def test_init_headers_list_of_tuples(self):
-        session = ClientSession(
-            headers=[("h1", "header1"),
-                     ("h2", "header2"),
-                     ("h3", "header3")],
-            loop=self.loop)
-        self.assertEqual(
-            set(session._default_headers),
-            set([("h1", "header1"),
-                 ("h2", "header2"),
-                 ("h3", "header3")]))
-        session.close()
 
-    def test_init_headers_MultiDict(self):
-        session = ClientSession(
-            headers=MultiDict(
-                [("h1", "header1"),
-                 ("h2", "header2"),
-                 ("h3", "header3")]),
-            loop=self.loop)
-        self.assertEqual(
-            set(session._default_headers),
-            set([("h1", "header1"),
-                 ("h2", "header2"),
-                 ("h3", "header3")]))
-        session.close()
+@pytest.fixture
+def session(create_session):
+    return create_session()
 
-    def test_init_cookies_with_simple_dict(self):
-        session = ClientSession(
-            cookies={
-                "c1": "cookie1",
-                "c2": "cookie2"
-            }, loop=self.loop)
-        self.assertEqual(set(session.cookies), {'c1', 'c2'})
-        self.assertEqual(session.cookies['c1'].value, 'cookie1')
-        self.assertEqual(session.cookies['c2'].value, 'cookie2')
-        session.close()
 
-    def test_init_cookies_with_list_of_tuples(self):
-        session = ClientSession(
-            cookies=[("c1", "cookie1"),
-                     ("c2", "cookie2")],
-            loop=self.loop)
-        self.assertEqual(set(session.cookies), {'c1', 'c2'})
-        self.assertEqual(session.cookies['c1'].value, 'cookie1')
-        self.assertEqual(session.cookies['c2'].value, 'cookie2')
-        session.close()
+@pytest.fixture
+def params():
+    return dict(
+        headers={"Authorization": "Basic ..."},
+        max_redirects=2,
+        encoding="latin1",
+        version=aiohttp.HttpVersion10,
+        compress="deflate",
+        chunked=True,
+        expect100=True,
+        read_until_eof=False)
 
-    def test_merge_headers(self):
+
+def test_init_headers_simple_dict(create_session):
+    session = create_session(headers={"h1": "header1",
+                                      "h2": "header2"})
+    assert (sorted(session._default_headers.items()) ==
+            ([("H1", "header1"), ("H2", "header2")]))
+
+
+def test_init_headers_list_of_tuples(create_session):
+    session = create_session(headers=[("h1", "header1"),
+                                      ("h2", "header2"),
+                                      ("h3", "header3")])
+    assert (session._default_headers ==
+            CIMultiDict([("h1", "header1"),
+                         ("h2", "header2"),
+                         ("h3", "header3")]))
+
+
+def test_init_headers_MultiDict(create_session):
+    session = create_session(headers=MultiDict([("h1", "header1"),
+                                                ("h2", "header2"),
+                                                ("h3", "header3")]))
+    assert (session._default_headers ==
+            CIMultiDict([("H1", "header1"),
+                         ("H2", "header2"),
+                         ("H3", "header3")]))
+
+
+def test_init_headers_list_of_tuples_with_duplicates(create_session):
+    session = create_session(headers=[("h1", "header11"),
+                                      ("h2", "header21"),
+                                      ("h1", "header12")])
+    assert (session._default_headers ==
+            CIMultiDict([("H1", "header11"),
+                         ("H2", "header21"),
+                         ("H1", "header12")]))
+
+
+def test_init_cookies_with_simple_dict(create_session):
+    session = create_session(cookies={"c1": "cookie1",
+                                      "c2": "cookie2"})
+    assert set(session.cookies) == {'c1', 'c2'}
+    assert session.cookies['c1'].value == 'cookie1'
+    assert session.cookies['c2'].value == 'cookie2'
+
+
+def test_init_cookies_with_list_of_tuples(create_session):
+    session = create_session(cookies=[("c1", "cookie1"),
+                                      ("c2", "cookie2")])
+
+    assert set(session.cookies) == {'c1', 'c2'}
+    assert session.cookies['c1'].value == 'cookie1'
+    assert session.cookies['c2'].value == 'cookie2'
+
+
+def test_merge_headers(create_session):
         # Check incoming simple dict
-        session = ClientSession(
-            headers={
-                "h1": "header1",
-                "h2": "header2"
-            }, loop=self.loop)
-        headers = session._prepare_headers({
-            "h1": "h1"
-        })
-        self.assertIsInstance(headers, CIMultiDict)
-        self.assertEqual(headers, CIMultiDict([
-            ("h1", "h1"),
-            ("h2", "header2")
-        ]))
-        session.close()
+    session = create_session(headers={"h1": "header1",
+                                      "h2": "header2"})
+    headers = session._prepare_headers({"h1": "h1"})
 
-    def test_merge_headers_with_multi_dict(self):
-        session = ClientSession(
-            headers={
-                "h1": "header1",
-                "h2": "header2"
-            }, loop=self.loop)
-        headers = session._prepare_headers(MultiDict([("h1", "h1")]))
-        self.assertIsInstance(headers, CIMultiDict)
-        self.assertEqual(headers, CIMultiDict([
-            ("h1", "h1"),
-            ("h2", "header2")
-        ]))
-        session.close()
+    assert isinstance(headers, CIMultiDict)
+    assert headers == CIMultiDict([("h2", "header2"),
+                                   ("h1", "h1")])
 
-    def test_merge_headers_with_list_of_tuples(self):
-        session = ClientSession(
-            headers={
-                "h1": "header1",
-                "h2": "header2"
-            }, loop=self.loop)
-        headers = session._prepare_headers([("h1", "h1")])
-        self.assertIsInstance(headers, CIMultiDict)
-        self.assertEqual(headers, CIMultiDict([
-            ("h1", "h1"),
-            ("h2", "header2")
-        ]))
-        session.close()
 
-    def _make_one(self):
-        session = ClientSession(loop=self.loop)
-        params = dict(
-            headers={"Authorization": "Basic ..."},
-            max_redirects=2,
-            encoding="latin1",
-            version=aiohttp.HttpVersion10,
-            compress="deflate",
-            chunked=True,
-            expect100=True,
-            read_until_eof=False)
-        return session, params
+def test_merge_headers_with_multi_dict(create_session):
+    session = create_session(headers={"h1": "header1",
+                                      "h2": "header2"})
+    headers = session._prepare_headers(MultiDict([("h1", "h1")]))
+    assert isinstance(headers, CIMultiDict)
+    assert headers == CIMultiDict([("h2", "header2"),
+                                   ("h1", "h1")])
 
-    @mock.patch("aiohttp.client.ClientSession.request")
-    def test_http_GET(self, patched):
-        session, params = self._make_one()
-        self.run(session.get(
-            "http://test.example.com",
-            params={"x": 1},
-            **params))
-        self.assertTrue(patched.called, "`ClientSession.request` not called")
-        self.assertEqual(
-            list(patched.call_args),
-            [("GET", "http://test.example.com",),
-             dict(
-                 params={"x": 1},
-                 allow_redirects=True,
-                 **params)])
-        session.close()
 
-    @mock.patch("aiohttp.client.ClientSession.request")
-    def test_http_OPTIONS(self, patched):
-        session, params = self._make_one()
-        self.run(session.options(
-            "http://opt.example.com",
-            params={"x": 2},
-            **params))
-        self.assertTrue(patched.called, "`ClientSession.request` not called")
-        self.assertEqual(
-            list(patched.call_args),
-            [("OPTIONS", "http://opt.example.com",),
-             dict(
-                params={"x": 2},
-                allow_redirects=True,
-                **params)])
-        session.close()
+def test_merge_headers_with_list_of_tuples(create_session):
+    session = create_session(headers={"h1": "header1",
+                                      "h2": "header2"})
+    headers = session._prepare_headers([("h1", "h1")])
+    assert isinstance(headers, CIMultiDict)
+    assert headers == CIMultiDict([("h2", "header2"),
+                                   ("h1", "h1")])
 
-    @mock.patch("aiohttp.client.ClientSession.request")
-    def test_http_HEAD(self, patched):
-        session, params = self._make_one()
-        self.run(session.head(
-            "http://head.example.com",
-            params={"x": 2},
-            **params))
-        self.assertTrue(patched.called, "`ClientSession.request` not called")
-        self.assertEqual(
-            list(patched.call_args),
-            [("HEAD", "http://head.example.com",),
-             dict(
-                params={"x": 2},
-                allow_redirects=False,
-                **params)])
-        session.close()
 
-    @mock.patch("aiohttp.client.ClientSession.request")
-    def test_http_POST(self, patched):
-        session, params = self._make_one()
-        self.run(session.post(
-            "http://post.example.com",
-            params={"x": 2},
-            data="Some_data",
-            files={"x": '1'},
-            **params))
-        self.assertTrue(patched.called, "`ClientSession.request` not called")
-        self.assertEqual(
-            list(patched.call_args),
-            [("POST", "http://post.example.com",),
-             dict(
-                params={"x": 2},
-                data="Some_data",
-                files={"x": '1'},
-                **params)])
-        session.close()
+def test_merge_headers_with_list_of_tuples_duplicated_names(create_session):
+    session = create_session(headers={"h1": "header1",
+                                      "h2": "header2"})
 
-    @mock.patch("aiohttp.client.ClientSession.request")
-    def test_http_PUT(self, patched):
-        session, params = self._make_one()
-        self.run(session.put(
-            "http://put.example.com",
-            params={"x": 2},
-            data="Some_data",
-            files={"x": '1'},
-            **params))
-        self.assertTrue(patched.called, "`ClientSession.request` not called")
-        self.assertEqual(
-            list(patched.call_args),
-            [("PUT", "http://put.example.com",),
-             dict(
-                 params={"x": 2},
-                 data="Some_data",
-                 files={"x": '1'},
-                 **params)])
-        session.close()
+    headers = session._prepare_headers([("h1", "v1"),
+                                        ("h1", "v2")])
 
-    @mock.patch("aiohttp.client.ClientSession.request")
-    def test_http_PATCH(self, patched):
-        session, params = self._make_one()
-        self.run(session.patch(
-            "http://patch.example.com",
-            params={"x": 2},
-            data="Some_data",
-            files={"x": '1'},
-            **params))
-        self.assertTrue(patched.called, "`ClientSession.request` not called")
-        self.assertEqual(
-            list(patched.call_args),
-            [("PATCH", "http://patch.example.com",),
-             dict(
-                params={"x": 2},
-                data="Some_data",
-                files={"x": '1'},
-                **params)])
-        session.close()
+    assert isinstance(headers, CIMultiDict)
+    assert headers == CIMultiDict([("H2", "header2"),
+                                   ("H1", "v1"),
+                                   ("H1", "v2")])
 
-    @mock.patch("aiohttp.client.ClientSession.request")
-    def test_http_DELETE(self, patched):
-        session, params = self._make_one()
-        self.run(session.delete(
-            "http://delete.example.com",
-            params={"x": 2},
-            **params))
-        self.assertTrue(patched.called, "`ClientSession.request` not called")
-        self.assertEqual(
-            list(patched.call_args),
-            [("DELETE", "http://delete.example.com",),
-             dict(
-                params={"x": 2},
-                **params)])
-        session.close()
 
-    def test_close(self):
-        conn = self.make_open_connector()
-        session = ClientSession(loop=self.loop, connector=conn)
+def test_http_GET(session, params):
+    with mock.patch("aiohttp.client.ClientSession._request") as patched:
+        session.get("http://test.example.com",
+                    params={"x": 1},
+                    **params)
+    assert patched.called, "`ClientSession._request` not called"
+    assert list(patched.call_args) == [("GET", "http://test.example.com",),
+                                       dict(
+                                           params={"x": 1},
+                                           allow_redirects=True,
+                                           **params)]
 
-        session.close()
-        self.assertIsNone(session.connector)
-        self.assertTrue(conn.closed)
 
-    def test_closed(self):
-        session = ClientSession(loop=self.loop)
-        self.assertFalse(session.closed)
-        session.close()
-        self.assertTrue(session.closed)
+def test_http_OPTIONS(session, params):
+    with mock.patch("aiohttp.client.ClientSession._request") as patched:
+        session.options("http://opt.example.com",
+                        params={"x": 2},
+                        **params)
+    assert patched.called, "`ClientSession._request` not called"
+    assert list(patched.call_args) == [("OPTIONS", "http://opt.example.com",),
+                                       dict(
+                                           params={"x": 2},
+                                           allow_redirects=True,
+                                           **params)]
 
-    def test_connector(self):
-        connector = TCPConnector(loop=self.loop)
-        session = ClientSession(connector=connector, loop=self.loop)
-        self.assertIs(session.connector, connector)
-        session.close()
 
-    def test_connector_loop(self):
-        loop = asyncio.new_event_loop()
-        connector = TCPConnector(loop=loop)
-        with self.assertRaisesRegex(
-                ValueError,
-                "loop argument must agree with connector"):
-            ClientSession(connector=connector, loop=self.loop)
-        connector.close()
-        loop.close()
+def test_http_HEAD(session, params):
+    with mock.patch("aiohttp.client.ClientSession._request") as patched:
+        session.head("http://head.example.com",
+                     params={"x": 2},
+                     **params)
+    assert patched.called, "`ClientSession._request` not called"
+    assert list(patched.call_args) == [("HEAD", "http://head.example.com",),
+                                       dict(
+                                           params={"x": 2},
+                                           allow_redirects=False,
+                                           **params)]
 
-    def test_cookies_are_readonly(self):
-        session = ClientSession(loop=self.loop)
-        with self.assertRaises(AttributeError):
-            session.cookies = 123
-        session.close()
 
-    def test_detach(self):
-        session = ClientSession(loop=self.loop)
-        conn = session.connector
-        self.assertFalse(conn.closed)
+def test_http_POST(session, params):
+    with mock.patch("aiohttp.client.ClientSession._request") as patched:
+        session.post("http://post.example.com",
+                     params={"x": 2},
+                     data="Some_data",
+                     **params)
+    assert patched.called, "`ClientSession._request` not called"
+    assert list(patched.call_args) == [("POST", "http://post.example.com",),
+                                       dict(
+                                           params={"x": 2},
+                                           data="Some_data",
+                                           **params)]
+
+
+def test_http_PUT(session, params):
+    with mock.patch("aiohttp.client.ClientSession._request") as patched:
+        session.put("http://put.example.com",
+                    params={"x": 2},
+                    data="Some_data",
+                    **params)
+    assert patched.called, "`ClientSession._request` not called"
+    assert list(patched.call_args) == [("PUT", "http://put.example.com",),
+                                       dict(
+                                           params={"x": 2},
+                                           data="Some_data",
+                                           **params)]
+
+
+def test_http_PATCH(session, params):
+    with mock.patch("aiohttp.client.ClientSession._request") as patched:
+        session.patch("http://patch.example.com",
+                      params={"x": 2},
+                      data="Some_data",
+                      **params)
+    assert patched.called, "`ClientSession._request` not called"
+    assert list(patched.call_args) == [("PATCH", "http://patch.example.com",),
+                                       dict(
+                                           params={"x": 2},
+                                           data="Some_data",
+                                           **params)]
+
+
+def test_http_DELETE(session, params):
+    with mock.patch("aiohttp.client.ClientSession._request") as patched:
+        session.delete("http://delete.example.com",
+                       params={"x": 2},
+                       **params)
+    assert patched.called, "`ClientSession._request` not called"
+    assert list(patched.call_args) == [("DELETE",
+                                        "http://delete.example.com",),
+                                       dict(
+                                           params={"x": 2},
+                                           **params)]
+
+
+def test_close(create_session, connector):
+    session = create_session(connector=connector)
+
+    session.close()
+    assert session.connector is None
+    assert connector.closed
+
+
+def test_closed(session):
+    assert not session.closed
+    session.close()
+    assert session.closed
+
+
+def test_connector(create_session, loop):
+    connector = TCPConnector(loop=loop)
+    session = create_session(connector=connector)
+    assert session.connector is connector
+
+
+def test_connector_loop(loop):
+    with contextlib.ExitStack() as stack:
+        another_loop = asyncio.new_event_loop()
+        stack.enter_context(contextlib.closing(another_loop))
+        connector = TCPConnector(loop=another_loop)
+        stack.enter_context(contextlib.closing(connector))
+        with pytest.raises(ValueError) as ctx:
+            ClientSession(connector=connector, loop=loop)
+        assert re.match("loop argument must agree with connector",
+                        str(ctx.value))
+
+
+def test_cookies_are_readonly(session):
+    with pytest.raises(AttributeError):
+        session.cookies = 123
+
+
+def test_detach(session):
+    conn = session.connector
+    try:
+        assert not conn.closed
         session.detach()
-        self.assertIsNone(session.connector)
-        self.assertTrue(session.closed)
-        self.assertFalse(conn.closed)
+        assert session.connector is None
+        assert session.closed
+        assert not conn.closed
+    finally:
         conn.close()
 
-    def test_request_closed_session(self):
-        @asyncio.coroutine
-        def go():
-            session = ClientSession(loop=self.loop)
-            session.close()
-            with self.assertRaises(RuntimeError):
-                yield from session.request('get', '/')
 
-        self.loop.run_until_complete(go())
+@pytest.mark.run_loop
+def test_request_closed_session(session):
+    session.close()
+    with pytest.raises(RuntimeError):
+        yield from session.request('get', '/')
 
-    def test_close_flag_for_closed_connector(self):
-        session = ClientSession(loop=self.loop)
-        conn = session.connector
-        self.assertFalse(session.closed)
-        conn.close()
-        self.assertTrue(session.closed)
 
-    def test_double_close(self):
-        conn = self.make_open_connector()
-        session = ClientSession(loop=self.loop, connector=conn)
+def test_close_flag_for_closed_connector(session):
+    conn = session.connector
+    assert not session.closed
+    conn.close()
+    assert session.closed
 
+
+def test_double_close(connector, create_session):
+    session = create_session(connector=connector)
+
+    session.close()
+    assert session.connector is None
+    session.close()
+    assert session.closed
+    assert connector.closed
+
+
+def test_del(connector, loop, warning):
+    # N.B. don't use session fixture, it stores extra reference internally
+    session = ClientSession(connector=connector, loop=loop)
+    loop.set_exception_handler(lambda loop, ctx: None)
+
+    with warning(ResourceWarning):
+        del session
+        gc.collect()
+
+
+def test_context_manager(connector, loop):
+    with ClientSession(loop=loop, connector=connector) as session:
+        pass
+
+    assert session.closed
+
+
+def test_borrow_connector_loop(connector, create_session, loop):
+    session = ClientSession(connector=connector, loop=None)
+    try:
+        assert session._loop, loop
+    finally:
         session.close()
-        self.assertIsNone(session.connector)
-        session.close()
-        self.assertTrue(session.closed)
-        self.assertTrue(conn.closed)
-
-    @unittest.skipUnless(PY_341, "Requires Python 3.4.1+")
-    def test_del(self):
-        conn = self.make_open_connector()
-        session = ClientSession(loop=self.loop, connector=conn)
-
-        with self.assertWarns(ResourceWarning):
-            del session
-            gc.collect()
-
-    def test_context_manager(self):
-        conn = self.make_open_connector()
-        with ClientSession(loop=self.loop, connector=conn) as session:
-            pass
-
-        self.assertTrue(session.closed)
-
-    def test_borrow_connector_loop(self):
-        conn = self.make_open_connector()
-        session = ClientSession(connector=conn)
-        self.assertIs(session._loop, self.loop)
 
 
-class TestCLientRequest(unittest.TestCase):
+@pytest.mark.run_loop
+def test_reraise_os_error(create_session):
+    err = OSError(1, "permission error")
+    req = mock.Mock()
+    req_factory = mock.Mock(return_value=req)
+    req.send = mock.Mock(side_effect=err)
+    session = create_session(request_class=req_factory)
 
-    def setUp(self):
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(None)
-        self.connector = BaseConnector(loop=self.loop)
-        self.transport = mock.Mock()
-        self.protocol = mock.Mock()
+    @asyncio.coroutine
+    def create_connection(req):
+        # return self.transport, self.protocol
+        return mock.Mock(), mock.Mock()
+    session._connector._create_connection = create_connection
 
-    def tearDown(self):
-        self.loop.close()
+    with pytest.raises(aiohttp.ClientOSError) as ctx:
+        yield from session.request('get', 'http://example.com')
+    e = ctx.value
+    assert e.errno == err.errno
+    assert e.strerror == err.strerror
 
-    def test_custom_req_rep(self):
-        @asyncio.coroutine
-        def go():
-            class CustomResponse(ClientResponse):
-                @asyncio.coroutine
-                def start(self, connection, read_until_eof=False):
-                    self.status = 123
-                    self.reason = 'Test OK'
-                    self.headers = CIMultiDictProxy(CIMultiDict())
-                    self.cookies = SimpleCookie()
-                    return
 
-            called = False
+def test_request_ctx_manager_props(loop):
+    with aiohttp.ClientSession(loop=loop) as client:
+        ctx_mgr = client.get('http://example.com')
 
-            class CustomRequest(ClientRequest):
-
-                def send(self, writer, reader):
-                    resp = self.response_class(self.method,
-                                               self.url,
-                                               self.host,
-                                               writer=self._writer,
-                                               continue100=self._continue)
-                    resp._post_init(self.loop)
-                    self.response = resp
-                    nonlocal called
-                    called = True
-                    return resp
-
-            @asyncio.coroutine
-            def create_connection(req):
-                self.assertIsInstance(req, CustomRequest)
-                return self.transport, self.protocol
-            self.connector._create_connection = create_connection
-
-            resp = yield from aiohttp.request('get',
-                                              'http://example.com/path/to',
-                                              request_class=CustomRequest,
-                                              response_class=CustomResponse,
-                                              connector=self.connector,
-                                              loop=self.loop)
-            self.assertIsInstance(resp, CustomResponse)
-            self.assertTrue(called)
-        self.loop.run_until_complete(go())
+        next(ctx_mgr)
+        assert isinstance(ctx_mgr.gi_frame, types.FrameType)
+        assert not ctx_mgr.gi_running
+        assert isinstance(ctx_mgr.gi_code, types.CodeType)

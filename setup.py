@@ -2,10 +2,11 @@ import codecs
 import os
 import re
 import sys
-from setuptools import setup, find_packages, Extension
+from setuptools import setup, Extension
 from distutils.errors import (CCompilerError, DistutilsExecError,
                               DistutilsPlatformError)
 from distutils.command.build_ext import build_ext
+from setuptools.command.test import test as TestCommand
 
 
 try:
@@ -40,7 +41,8 @@ class ve_build_ext(build_ext):
     def build_extension(self, ext):
         try:
             build_ext.build_extension(self, ext)
-        except (CCompilerError, DistutilsExecError, DistutilsPlatformError, ValueError):
+        except (CCompilerError, DistutilsExecError,
+                DistutilsPlatformError, ValueError):
             raise BuildFailed()
 
 
@@ -55,14 +57,26 @@ with codecs.open(os.path.join(os.path.abspath(os.path.dirname(
 
 install_requires = ['chardet']
 
-if sys.version_info < (3, 4):
-    install_requires += ['asyncio', 'enum34']
-
-tests_require = install_requires + ['nose', 'gunicorn']
+if sys.version_info < (3, 4, 1):
+    raise RuntimeError("aiohttp requires Python 3.4.1+")
 
 
 def read(f):
     return open(os.path.join(os.path.dirname(__file__), f)).read().strip()
+
+
+class PyTest(TestCommand):
+    user_options = []
+
+    def run(self):
+        import subprocess
+        import sys
+        errno = subprocess.call([sys.executable, '-m', 'pytest', 'tests'])
+        raise SystemExit(errno)
+
+
+tests_require = install_requires + ['pytest', 'gunicorn']
+
 
 args = dict(
     name='aiohttp',
@@ -74,21 +88,22 @@ args = dict(
         'Intended Audience :: Developers',
         'Programming Language :: Python',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.3',
         'Programming Language :: Python :: 3.4',
         'Programming Language :: Python :: 3.5',
         'Topic :: Internet :: WWW/HTTP'],
     author='Nikolay Kim',
     author_email='fafhrd91@gmail.com',
+    maintainer='Andrew Svetlov',
+    maintainer_email='andrew.svetlov@gmail.com',
     url='https://github.com/KeepSafe/aiohttp/',
     license='Apache 2',
-    packages=find_packages(),
+    packages=['aiohttp'],
     install_requires=install_requires,
     tests_require=tests_require,
-    test_suite='nose.collector',
     include_package_data=True,
     ext_modules=extensions,
-    cmdclass=dict(build_ext=ve_build_ext))
+    cmdclass=dict(build_ext=ve_build_ext,
+                  test=PyTest))
 
 try:
     setup(**args)

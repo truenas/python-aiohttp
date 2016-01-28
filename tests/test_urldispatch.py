@@ -1,6 +1,7 @@
 import asyncio
 import os
 import unittest
+from collections.abc import Sized, Container, Iterable, Mapping, MutableMapping
 from unittest import mock
 from urllib.parse import unquote
 import aiohttp.web
@@ -75,6 +76,16 @@ class TestUrlDispatcher(unittest.TestCase):
         route = PlainRoute('GET', handler, 'test', '/handler/to/path')
         self.router.register_route(route)
         self.assertRaises(ValueError, self.router.register_route, route)
+
+        route = PlainRoute('GET', handler, '1bad name', '/handler/to/path')
+        self.assertRaises(ValueError, self.router.register_route, route)
+
+        route = PlainRoute('GET', handler, 'return', '/handler/to/path')
+        self.assertRaises(ValueError, self.router.register_route, route)
+
+        route = PlainRoute('GET', handler, 'test.test:test-test',
+                           '/handler/to/path')
+        self.router.register_route(route)
 
     def test_add_route_root(self):
         handler = self.make_handler()
@@ -555,3 +566,102 @@ class TestUrlDispatcher(unittest.TestCase):
         with self.assertRaises(ValueError):
             handler = self.make_handler()
             self.router.add_route('INVALID_METHOD', '/path', handler)
+
+    def test_static_handle_eof(self):
+        loop = mock.Mock()
+        route = self.router.add_static('/st',
+                                       os.path.dirname(aiohttp.__file__))
+        with mock.patch('aiohttp.web_urldispatcher.os') as m_os:
+            out_fd = 30
+            in_fd = 31
+            fut = asyncio.Future(loop=self.loop)
+            m_os.sendfile.return_value = 0
+            route._sendfile_cb(fut, out_fd, in_fd, 0, 100, loop, False)
+            m_os.sendfile.assert_called_with(out_fd, in_fd, 0, 100)
+            self.assertTrue(fut.done())
+            self.assertIsNone(fut.result())
+            self.assertFalse(loop.add_writer.called)
+            self.assertFalse(loop.remove_writer.called)
+
+    def test_static_handle_again(self):
+        loop = mock.Mock()
+        route = self.router.add_static('/st',
+                                       os.path.dirname(aiohttp.__file__))
+        with mock.patch('aiohttp.web_urldispatcher.os') as m_os:
+            out_fd = 30
+            in_fd = 31
+            fut = asyncio.Future(loop=self.loop)
+            m_os.sendfile.side_effect = BlockingIOError()
+            route._sendfile_cb(fut, out_fd, in_fd, 0, 100, loop, False)
+            m_os.sendfile.assert_called_with(out_fd, in_fd, 0, 100)
+            self.assertFalse(fut.done())
+            loop.add_writer.assert_called_with(out_fd, route._sendfile_cb,
+                                               fut, out_fd, in_fd, 0, 100,
+                                               loop, True)
+            self.assertFalse(loop.remove_writer.called)
+
+    def test_static_handle_exception(self):
+        loop = mock.Mock()
+        route = self.router.add_static('/st',
+                                       os.path.dirname(aiohttp.__file__))
+        with mock.patch('aiohttp.web_urldispatcher.os') as m_os:
+            out_fd = 30
+            in_fd = 31
+            fut = asyncio.Future(loop=self.loop)
+            exc = OSError()
+            m_os.sendfile.side_effect = exc
+            route._sendfile_cb(fut, out_fd, in_fd, 0, 100, loop, False)
+            m_os.sendfile.assert_called_with(out_fd, in_fd, 0, 100)
+            self.assertTrue(fut.done())
+            self.assertIs(exc, fut.exception())
+            self.assertFalse(loop.add_writer.called)
+            self.assertFalse(loop.remove_writer.called)
+
+    def fill_routes(self):
+        route1 = self.router.add_route('GET', '/plain', self.make_handler())
+        route2 = self.router.add_route('GET', '/variable/{name}',
+                                       self.make_handler())
+        route3 = self.router.add_static('/static',
+                                        os.path.dirname(aiohttp.__file__))
+        return route1, route2, route3
+
+    def test_routes_view_len(self):
+        self.fill_routes()
+        self.assertEqual(3, len(self.router.routes()))
+
+    def test_routes_view_iter(self):
+        routes = self.fill_routes()
+        self.assertEqual(list(routes), list(self.router.routes()))
+
+    def test_routes_view_contains(self):
+        routes = self.fill_routes()
+        for route in routes:
+            self.assertIn(route, self.router.routes())
+
+    def test_routes_abc(self):
+        self.assertIsInstance(self.router.routes(), Sized)
+        self.assertIsInstance(self.router.routes(), Iterable)
+        self.assertIsInstance(self.router.routes(), Container)
+
+    def fill_named_routes(self):
+        route1 = self.router.add_route('GET', '/plain', self.make_handler(),
+                                       name='route1')
+        route2 = self.router.add_route('GET', '/variable/{name}',
+                                       self.make_handler(), name='route2')
+        route3 = self.router.add_static('/static',
+                                        os.path.dirname(aiohttp.__file__),
+                                        name='route3')
+        return route1, route2, route3
+
+    def test_named_routes_abc(self):
+        self.assertIsInstance(self.router.named_routes(), Mapping)
+        self.assertNotIsInstance(self.router.named_routes(), MutableMapping)
+
+    def test_named_routes(self):
+        named_routes = self.fill_named_routes()
+
+        self.assertEqual(3, len(self.router.named_routes()))
+
+        for route in named_routes:
+            self.assertIn(route.name, self.router.named_routes())
+            self.assertEqual(route, self.router.named_routes()[route.name])

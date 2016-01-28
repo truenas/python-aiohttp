@@ -6,103 +6,16 @@ import gc
 import socket
 import unittest
 import ssl
-import sys
+import tempfile
+import shutil
+import os.path
 from unittest import mock
 
 import aiohttp
+from aiohttp import web
 from aiohttp import client
-from aiohttp import test_utils
-from aiohttp.errors import FingerprintMismatch
-from aiohttp.client import ClientResponse, ClientRequest
+from aiohttp.client import ClientResponse
 from aiohttp.connector import Connection
-
-from tests.test_client_functional import Functional
-
-PY_341 = sys.version_info >= (3, 4, 1)
-
-
-class TestHttpConnection(unittest.TestCase):
-
-    def setUp(self):
-        self.key = object()
-        self.connector = mock.Mock()
-        self.request = mock.Mock()
-        self.transport = mock.Mock()
-        self.protocol = mock.Mock()
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(None)
-
-    def tearDown(self):
-        self.loop.close()
-
-    @unittest.skipUnless(PY_341, "Requires Python 3.4.1+")
-    def test_del(self):
-        conn = Connection(
-            self.connector, self.key, self.request,
-            self.transport, self.protocol, self.loop)
-        exc_handler = unittest.mock.Mock()
-        self.loop.set_exception_handler(exc_handler)
-
-        with self.assertWarns(ResourceWarning):
-            del conn
-            gc.collect()
-
-        self.connector._release.assert_called_with(self.key,
-                                                   self.request,
-                                                   self.transport,
-                                                   self.protocol,
-                                                   should_close=True)
-        msg = {'client_connection': unittest.mock.ANY,  # conn was deleted
-               'message': 'Unclosed connection'}
-        if self.loop.get_debug():
-            msg['source_traceback'] = unittest.mock.ANY
-        exc_handler.assert_called_with(self.loop, msg)
-
-    def test_close(self):
-        conn = Connection(
-            self.connector, self.key, self.request,
-            self.transport, self.protocol, self.loop)
-        self.assertFalse(conn.closed)
-        conn.close()
-        self.assertIsNone(conn._transport)
-        self.connector._release.assert_called_with(
-            self.key, self.request, self.transport, self.protocol,
-            should_close=True)
-        self.assertTrue(conn.closed)
-
-    def test_release(self):
-        conn = Connection(
-            self.connector, self.key, self.request,
-            self.transport, self.protocol, self.loop)
-        self.assertFalse(conn.closed)
-        conn.release()
-        self.assertFalse(self.transport.close.called)
-        self.assertIsNone(conn._transport)
-        self.connector._release.assert_called_with(
-            self.key, self.request, self.transport, self.protocol,
-            should_close=False)
-        self.assertTrue(conn.closed)
-
-    def test_release_released(self):
-        conn = Connection(
-            self.connector, self.key, self.request,
-            self.transport, self.protocol, self.loop)
-        conn.release()
-        self.connector._release.reset_mock()
-        conn.release()
-        self.assertFalse(self.transport.close.called)
-        self.assertIsNone(conn._transport)
-        self.assertFalse(self.connector._release.called)
-
-    def test_detach(self):
-        conn = Connection(
-            self.connector, self.key, self.request,
-            self.transport, self.protocol, self.loop)
-        self.assertFalse(conn.closed)
-        conn.detach()
-        self.assertIsNone(conn._transport)
-        self.assertFalse(self.connector._release.called)
-        self.assertTrue(conn.closed)
 
 
 class TestBaseConnector(unittest.TestCase):
@@ -113,14 +26,14 @@ class TestBaseConnector(unittest.TestCase):
 
         self.transport = unittest.mock.Mock()
         self.stream = aiohttp.StreamParser()
-        self.response = ClientResponse('get', 'http://python.org')
-        self.response._loop = self.loop
+        self.response = ClientResponse('get', 'http://base-conn.org')
+        self.response._post_init(self.loop)
 
     def tearDown(self):
+        self.response.close()
         self.loop.close()
         gc.collect()
 
-    @unittest.skipUnless(PY_341, "Requires Python 3.4.1+")
     def test_del(self):
         conn = aiohttp.BaseConnector(loop=self.loop)
         transp = unittest.mock.Mock()
@@ -137,12 +50,12 @@ class TestBaseConnector(unittest.TestCase):
         self.assertFalse(conns_impl)
         transp.close.assert_called_with()
         msg = {'connector': unittest.mock.ANY,  # conn was deleted
+               'connections': unittest.mock.ANY,
                'message': 'Unclosed connector'}
         if self.loop.get_debug():
             msg['source_traceback'] = unittest.mock.ANY
         exc_handler.assert_called_with(self.loop, msg)
 
-    @unittest.skipUnless(PY_341, "Requires Python 3.4.1+")
     def test_del_with_scheduled_cleanup(self):
         conn = aiohttp.BaseConnector(loop=self.loop, keepalive_timeout=0.01)
         transp = unittest.mock.Mock()
@@ -166,7 +79,6 @@ class TestBaseConnector(unittest.TestCase):
             msg['source_traceback'] = unittest.mock.ANY
         exc_handler.assert_called_with(self.loop, msg)
 
-    @unittest.skipUnless(PY_341, "Requires Python 3.4.1+")
     def test_del_with_closed_loop(self):
         conn = aiohttp.BaseConnector(loop=self.loop)
         transp = unittest.mock.Mock()
@@ -186,7 +98,6 @@ class TestBaseConnector(unittest.TestCase):
         self.assertFalse(transp.close.called)
         self.assertTrue(exc_handler.called)
 
-    @unittest.skipUnless(PY_341, "Requires Python 3.4.1+")
     def test_del_empty_conector(self):
         conn = aiohttp.BaseConnector(loop=self.loop)
 
@@ -249,7 +160,7 @@ class TestBaseConnector(unittest.TestCase):
         conn._start_cleanup_task = unittest.mock.Mock()
         req = unittest.mock.Mock()
         resp = req.response = unittest.mock.Mock()
-        resp.message.should_close = False
+        resp._should_close = False
 
         tr, proto = unittest.mock.Mock(), unittest.mock.Mock()
         key = 1
@@ -387,11 +298,15 @@ class TestBaseConnector(unittest.TestCase):
         conn = aiohttp.BaseConnector(loop=self.loop)
         conn._create_connection = unittest.mock.Mock()
         conn._create_connection.return_value = asyncio.Future(loop=self.loop)
-        conn._create_connection.return_value.set_exception(OSError())
+        err = OSError(1, 'permission error')
+        conn._create_connection.return_value.set_exception(err)
 
-        with self.assertRaises(aiohttp.ClientOSError):
+        with self.assertRaises(aiohttp.ClientOSError) as ctx:
             req = unittest.mock.Mock()
             self.loop.run_until_complete(conn.connect(req))
+        self.assertEqual(1, ctx.exception.errno)
+        self.assertTrue(ctx.exception.strerror.startswith('Cannot connect to'))
+        self.assertTrue(ctx.exception.strerror.endswith('[permission error]'))
 
     def test_start_cleanup_task(self):
         loop = unittest.mock.Mock()
@@ -469,7 +384,7 @@ class TestBaseConnector(unittest.TestCase):
             self.assertFalse(conn.resolve)
         self.assertFalse(conn.use_dns_cache)
 
-        self.assertEqual(conn.family, socket.AF_INET)
+        self.assertEqual(conn.family, 0)
 
         with self.assertWarns(DeprecationWarning):
             self.assertEqual(conn.resolved_hosts, {})
@@ -484,45 +399,6 @@ class TestBaseConnector(unittest.TestCase):
         invalid = b'\x00'
         with self.assertRaises(ValueError):
             aiohttp.TCPConnector(loop=self.loop, fingerprint=invalid)
-
-    def test_tcp_connector_fingerprint(self):
-        # The even-index fingerprints below are "expect success" cases
-        # for ./sample.crt.der, the cert presented by test_utils.run_server.
-        # The odd-index fingerprints are "expect fail" cases.
-        testcases = (
-            # md5
-            b'\xa2\x06G\xad\xaa\xf5\xd8\\J\x99^by;\x06=',
-            b'\x00' * 16,
-
-            # sha1
-            b's\x93\xfd:\xed\x08\x1do\xa9\xaeq9\x1a\xe3\xc5\x7f\x89\xe7l\xf9',
-            b'\x00' * 20,
-
-            # sha256
-            b'0\x9a\xc9D\x83\xdc\x91\'\x88\x91\x11\xa1d\x97\xfd\xcb~7U\x14D@L'
-            b'\x11\xab\x99\xa8\xae\xb7\x14\xee\x8b',
-            b'\x00' * 32,
-        )
-        for i, fingerprint in enumerate(testcases):
-            expect_fail = i % 2
-            conn = aiohttp.TCPConnector(loop=self.loop, verify_ssl=False,
-                                        fingerprint=fingerprint)
-            with test_utils.run_server(self.loop, use_ssl=True) as httpd:
-                coro = client.request('get', httpd.url('method', 'get'),
-                                      connector=conn, loop=self.loop)
-                if expect_fail:
-                    with self.assertRaises(FingerprintMismatch) as cm:
-                        self.loop.run_until_complete(coro)
-                    exc = cm.exception
-                    self.assertEqual(exc.expected, fingerprint)
-                    # the previous test case should be what we actually got
-                    self.assertEqual(exc.got, testcases[i-1])
-                else:
-                    # should not raise
-                    resp = self.loop.run_until_complete(coro)
-                    resp.close(force=True)
-
-            conn.close()
 
     def test_tcp_connector_clear_resolved_hosts(self):
         conn = aiohttp.TCPConnector(loop=self.loop)
@@ -689,6 +565,75 @@ class TestBaseConnector(unittest.TestCase):
 
         self.loop.run_until_complete(go())
 
+    def test_connect_with_limit_concurrent(self):
+
+        @asyncio.coroutine
+        def go():
+            proto = unittest.mock.Mock()
+            proto.is_connected.return_value = True
+
+            class Req:
+                host = 'host'
+                port = 80
+                ssl = False
+                response = unittest.mock.Mock(_should_close=False)
+
+            max_connections = 2
+            num_connections = 0
+
+            conn = aiohttp.BaseConnector(limit=max_connections, loop=self.loop)
+
+            # Use a real coroutine for _create_connection; a mock would mask
+            # problems that only happen when the method yields.
+
+            @asyncio.coroutine
+            def create_connection(req):
+                nonlocal num_connections
+                num_connections += 1
+                yield from asyncio.sleep(0, loop=self.loop)
+
+                # Make a new transport mock each time because acquired
+                # transports are stored in a set. Reusing the same object
+                # messes with the count.
+                tr = unittest.mock.Mock()
+
+                return tr, proto
+
+            conn._create_connection = create_connection
+
+            # Simulate something like a crawler. It opens a connection, does
+            # something with it, closes it, then creates tasks that make more
+            # connections and waits for them to finish. The crawler is started
+            # with multiple concurrent requests and stops when it hits a
+            # predefined maximum number of requests.
+
+            max_requests = 10
+            num_requests = 0
+            start_requests = max_connections + 1
+
+            @asyncio.coroutine
+            def f(start=True):
+                nonlocal num_requests
+                if num_requests == max_requests:
+                    return
+                num_requests += 1
+                if not start:
+                    connection = yield from conn.connect(Req())
+                    yield from asyncio.sleep(0, loop=self.loop)
+                    connection.release()
+                tasks = [
+                    asyncio.async(f(start=False), loop=self.loop)
+                    for i in range(start_requests)
+                ]
+                yield from asyncio.wait(tasks, loop=self.loop)
+
+            yield from f()
+            conn.close()
+
+            self.assertEqual(max_connections, num_connections)
+
+        self.loop.run_until_complete(go())
+
     def test_close_with_acquired_connection(self):
 
         @asyncio.coroutine
@@ -742,46 +687,90 @@ class TestBaseConnector(unittest.TestCase):
 class TestHttpClientConnector(unittest.TestCase):
 
     def setUp(self):
+        self.handler = None
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(None)
 
     def tearDown(self):
-        # just in case if we have transport close callbacks
-        test_utils.run_briefly(self.loop)
-
+        if self.handler:
+            self.loop.run_until_complete(self.handler.finish_connections())
+        self.loop.stop()
+        self.loop.run_forever()
         self.loop.close()
         gc.collect()
 
+    def find_unused_port(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(('127.0.0.1', 0))
+        port = s.getsockname()[1]
+        s.close()
+        return port
+
+    @asyncio.coroutine
+    def create_server(self, method, path, handler):
+        app = web.Application(loop=self.loop)
+        app.router.add_route(method, path, handler)
+
+        port = self.find_unused_port()
+        self.handler = app.make_handler(keep_alive_on=False)
+        srv = yield from self.loop.create_server(
+            self.handler, '127.0.0.1', port)
+        url = "http://127.0.0.1:{}".format(port) + path
+        self.addCleanup(srv.close)
+        return app, srv, url
+
+    @asyncio.coroutine
+    def create_unix_server(self, method, path, handler):
+        tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmpdir)
+        app = web.Application(loop=self.loop)
+        app.router.add_route(method, path, handler)
+
+        self.handler = app.make_handler(keep_alive_on=False)
+        sock_path = os.path.join(tmpdir, 'socket.sock')
+        srv = yield from self.loop.create_unix_server(
+            self.handler, sock_path)
+        url = "http://127.0.0.1" + path
+        self.addCleanup(srv.close)
+        return app, srv, url, sock_path
+
     def test_tcp_connector(self):
-        with test_utils.run_server(self.loop, router=Functional) as httpd:
-            r = self.loop.run_until_complete(
-                client.request(
-                    'get', httpd.url('method', 'get'),
-                    connector=aiohttp.TCPConnector(loop=self.loop),
-                    loop=self.loop))
-            content = self.loop.run_until_complete(r.content.read())
-            content = content.decode()
-            self.assertEqual(r.status, 200)
-            r.close()
+        @asyncio.coroutine
+        def handler(request):
+            return web.HTTPOk()
+
+        app, srv, url = self.loop.run_until_complete(
+            self.create_server('get', '/', handler))
+        conn = aiohttp.TCPConnector(loop=self.loop)
+        r = self.loop.run_until_complete(
+            aiohttp.request(
+                'get', url,
+                connector=conn,
+                loop=self.loop))
+        self.loop.run_until_complete(r.release())
+        self.assertEqual(r.status, 200)
+        r.close()
+        conn.close()
 
     @unittest.skipUnless(hasattr(socket, 'AF_UNIX'), 'requires unix')
     def test_unix_connector(self):
-        path = '/tmp/aiohttp_unix.sock'
+        @asyncio.coroutine
+        def handler(request):
+            return web.HTTPOk()
 
-        connector = aiohttp.UnixConnector(path, loop=self.loop)
-        self.assertEqual(path, connector.path)
+        app, srv, url, sock_path = self.loop.run_until_complete(
+            self.create_unix_server('get', '/', handler))
 
-        with test_utils.run_server(
-                self.loop, listen_addr=path, router=Functional) as httpd:
-            r = self.loop.run_until_complete(
-                client.request(
-                    'get', httpd.url('method', 'get'),
-                    connector=connector,
-                    loop=self.loop))
-            content = self.loop.run_until_complete(r.content.read())
-            content = content.decode()
-            self.assertEqual(r.status, 200)
-            r.close()
+        connector = aiohttp.UnixConnector(sock_path, loop=self.loop)
+        self.assertEqual(sock_path, connector.path)
+
+        r = self.loop.run_until_complete(
+            client.request(
+                'get', url,
+                connector=connector,
+                loop=self.loop))
+        self.assertEqual(r.status, 200)
+        r.close()
 
     def test_connector_cookie_deprecation(self):
         with self.assertWarnsRegex(DeprecationWarning,
@@ -807,379 +796,3 @@ class TestHttpClientConnector(unittest.TestCase):
         self.assertTrue(conn.use_dns_cache)
         with self.assertWarns(DeprecationWarning):
             self.assertTrue(conn.resolve)
-
-
-class TestProxyConnector(unittest.TestCase):
-
-    def setUp(self):
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(None)
-
-    def tearDown(self):
-        # just in case if we have transport close callbacks
-        test_utils.run_briefly(self.loop)
-
-        self.loop.close()
-        gc.collect()
-
-    def _fake_coroutine(self, mock, return_value):
-
-        def coro(*args, **kw):
-            if isinstance(return_value, Exception):
-                raise return_value
-            return return_value
-            yield  # pragma: no cover
-        mock.side_effect = coro
-
-    def test_ctor(self):
-        with self.assertRaises(AssertionError):
-            aiohttp.ProxyConnector('https://localhost:8118', loop=self.loop)
-
-    def test_ctor2(self):
-        connector = aiohttp.ProxyConnector('http://localhost:8118',
-                                           loop=self.loop)
-
-        self.assertEqual('http://localhost:8118', connector.proxy)
-        self.assertTrue(connector.force_close)
-
-    @unittest.mock.patch('aiohttp.connector.ClientRequest')
-    def test_connect(self, ClientRequestMock):
-        req = ClientRequest('GET', 'http://www.python.org', loop=self.loop)
-        self.assertEqual(req.path, '/')
-
-        loop_mock = unittest.mock.Mock()
-        connector = aiohttp.ProxyConnector('http://proxy.example.com',
-                                           loop=loop_mock)
-        self.assertIs(loop_mock, connector._loop)
-
-        resolve_host = unittest.mock.Mock()
-        self._fake_coroutine(resolve_host, [unittest.mock.MagicMock()])
-        connector._resolve_host = resolve_host
-
-        tr, proto = unittest.mock.Mock(), unittest.mock.Mock()
-        self._fake_coroutine(loop_mock.create_connection, (tr, proto))
-        conn = self.loop.run_until_complete(connector.connect(req))
-        self.assertEqual(req.path, 'http://www.python.org/')
-        self.assertIs(conn._transport, tr)
-        self.assertIs(conn._protocol, proto)
-
-        # resolve_host.assert_called_once_with('proxy.example.com', 80)
-        tr.get_extra_info.assert_called_once_with('sslcontext')
-
-        ClientRequestMock.assert_called_with(
-            'GET', 'http://proxy.example.com',
-            auth=None,
-            headers={'HOST': 'www.python.org'},
-            loop=loop_mock)
-        conn.close()
-
-    def test_proxy_auth(self):
-        with self.assertRaises(AssertionError) as ctx:
-            aiohttp.ProxyConnector('http://proxy.example.com',
-                                   proxy_auth=('user', 'pass'),
-                                   loop=unittest.mock.Mock())
-        self.assertEqual(ctx.exception.args[0],
-                         ("proxy_auth must be None or BasicAuth() tuple",
-                          ('user', 'pass')))
-
-    def test_proxy_connection_error(self):
-        connector = aiohttp.ProxyConnector('http://proxy.example.com',
-                                           loop=self.loop)
-        connector._resolve_host = resolve_mock = unittest.mock.Mock()
-        self._fake_coroutine(resolve_mock, OSError('dont take it serious'))
-
-        req = ClientRequest('GET', 'http://www.python.org', loop=self.loop)
-        expected_headers = dict(req.headers)
-        with self.assertRaises(aiohttp.ProxyConnectionError):
-            self.loop.run_until_complete(connector.connect(req))
-        self.assertEqual(req.path, '/')
-        self.assertEqual(dict(req.headers), expected_headers)
-
-    @unittest.mock.patch('aiohttp.connector.ClientRequest')
-    def test_auth(self, ClientRequestMock):
-        proxy_req = ClientRequest('GET', 'http://proxy.example.com',
-                                  auth=aiohttp.helpers.BasicAuth('user',
-                                                                 'pass'),
-                                  loop=self.loop)
-        ClientRequestMock.return_value = proxy_req
-        self.assertIn('AUTHORIZATION', proxy_req.headers)
-        self.assertNotIn('PROXY-AUTHORIZATION', proxy_req.headers)
-
-        loop_mock = unittest.mock.Mock()
-        connector = aiohttp.ProxyConnector(
-            'http://proxy.example.com', loop=loop_mock,
-            proxy_auth=aiohttp.helpers.BasicAuth('user', 'pass'))
-        connector._resolve_host = resolve_mock = unittest.mock.Mock()
-        self._fake_coroutine(resolve_mock, [unittest.mock.MagicMock()])
-
-        tr, proto = unittest.mock.Mock(), unittest.mock.Mock()
-        self._fake_coroutine(loop_mock.create_connection, (tr, proto))
-
-        req = ClientRequest('GET', 'http://www.python.org', loop=self.loop)
-        self.assertNotIn('AUTHORIZATION', req.headers)
-        self.assertNotIn('PROXY-AUTHORIZATION', req.headers)
-        conn = self.loop.run_until_complete(connector.connect(req))
-
-        self.assertEqual(req.path, 'http://www.python.org/')
-        self.assertNotIn('AUTHORIZATION', req.headers)
-        self.assertIn('PROXY-AUTHORIZATION', req.headers)
-        self.assertNotIn('AUTHORIZATION', proxy_req.headers)
-        self.assertNotIn('PROXY-AUTHORIZATION', proxy_req.headers)
-
-        ClientRequestMock.assert_called_with(
-            'GET', 'http://proxy.example.com',
-            auth=aiohttp.helpers.BasicAuth('user', 'pass'),
-            loop=unittest.mock.ANY, headers=unittest.mock.ANY)
-        conn.close()
-
-    def test_auth_utf8(self):
-        proxy_req = ClientRequest(
-            'GET', 'http://proxy.example.com',
-            auth=aiohttp.helpers.BasicAuth('юзер', 'пасс', 'utf-8'),
-            loop=self.loop)
-        self.assertIn('AUTHORIZATION', proxy_req.headers)
-
-    @unittest.mock.patch('aiohttp.connector.ClientRequest')
-    def test_auth_from_url(self, ClientRequestMock):
-        proxy_req = ClientRequest('GET', 'http://user:pass@proxy.example.com',
-                                  loop=self.loop)
-        ClientRequestMock.return_value = proxy_req
-        self.assertIn('AUTHORIZATION', proxy_req.headers)
-        self.assertNotIn('PROXY-AUTHORIZATION', proxy_req.headers)
-
-        loop_mock = unittest.mock.Mock()
-        connector = aiohttp.ProxyConnector(
-            'http://user:pass@proxy.example.com', loop=loop_mock)
-        connector._resolve_host = resolve_mock = unittest.mock.Mock()
-        self._fake_coroutine(resolve_mock, [unittest.mock.MagicMock()])
-
-        tr, proto = unittest.mock.Mock(), unittest.mock.Mock()
-        self._fake_coroutine(loop_mock.create_connection, (tr, proto))
-
-        req = ClientRequest('GET', 'http://www.python.org', loop=self.loop)
-        self.assertNotIn('AUTHORIZATION', req.headers)
-        self.assertNotIn('PROXY-AUTHORIZATION', req.headers)
-        conn = self.loop.run_until_complete(connector.connect(req))
-
-        self.assertEqual(req.path, 'http://www.python.org/')
-        self.assertNotIn('AUTHORIZATION', req.headers)
-        self.assertIn('PROXY-AUTHORIZATION', req.headers)
-        self.assertNotIn('AUTHORIZATION', proxy_req.headers)
-        self.assertNotIn('PROXY-AUTHORIZATION', proxy_req.headers)
-
-        ClientRequestMock.assert_called_with(
-            'GET', 'http://user:pass@proxy.example.com',
-            auth=None, loop=unittest.mock.ANY, headers=unittest.mock.ANY)
-        conn.close()
-
-    @unittest.mock.patch('aiohttp.connector.ClientRequest')
-    def test_auth__not_modifying_request(self, ClientRequestMock):
-        proxy_req = ClientRequest('GET', 'http://user:pass@proxy.example.com',
-                                  loop=self.loop)
-        ClientRequestMock.return_value = proxy_req
-        proxy_req_headers = dict(proxy_req.headers)
-
-        loop_mock = unittest.mock.Mock()
-        connector = aiohttp.ProxyConnector(
-            'http://user:pass@proxy.example.com', loop=loop_mock)
-        connector._resolve_host = resolve_mock = unittest.mock.Mock()
-        self._fake_coroutine(resolve_mock, OSError('nothing personal'))
-
-        req = ClientRequest('GET', 'http://www.python.org', loop=self.loop)
-        req_headers = dict(req.headers)
-        with self.assertRaises(aiohttp.ProxyConnectionError):
-            self.loop.run_until_complete(connector.connect(req))
-        self.assertEqual(req.headers, req_headers)
-        self.assertEqual(req.path, '/')
-        self.assertEqual(proxy_req.headers, proxy_req_headers)
-
-    @unittest.mock.patch('aiohttp.connector.ClientRequest')
-    def test_https_connect(self, ClientRequestMock):
-        loop_mock = unittest.mock.Mock()
-        proxy_req = ClientRequest('GET', 'http://proxy.example.com',
-                                  loop=loop_mock)
-        ClientRequestMock.return_value = proxy_req
-
-        proxy_resp = ClientResponse('get', 'http://proxy.example.com')
-        proxy_resp._loop = loop_mock
-        proxy_req.send = send_mock = unittest.mock.Mock()
-        send_mock.return_value = proxy_resp
-        proxy_resp.start = start_mock = unittest.mock.Mock()
-        self._fake_coroutine(start_mock, unittest.mock.Mock(status=200))
-
-        connector = aiohttp.ProxyConnector(
-            'http://proxy.example.com', loop=loop_mock)
-
-        tr, proto = unittest.mock.Mock(), unittest.mock.Mock()
-        self._fake_coroutine(loop_mock.create_connection, (tr, proto))
-
-        req = ClientRequest('GET', 'https://www.python.org', loop=self.loop)
-        self.loop.run_until_complete(connector._create_connection(req))
-
-        self.assertEqual(req.path, '/')
-        self.assertEqual(proxy_req.method, 'CONNECT')
-        self.assertEqual(proxy_req.path, 'www.python.org:443')
-        tr.pause_reading.assert_called_once_with()
-        tr.get_extra_info.assert_called_with('socket', default=None)
-
-        proxy_req.close()
-        proxy_resp.close()
-        req.close()
-
-    @unittest.mock.patch('aiohttp.connector.ClientRequest')
-    def test_https_connect_runtime_error(self, ClientRequestMock):
-        loop_mock = unittest.mock.Mock()
-        proxy_req = ClientRequest('GET', 'http://proxy.example.com',
-                                  loop=loop_mock)
-        ClientRequestMock.return_value = proxy_req
-
-        proxy_resp = ClientResponse('get', 'http://proxy.example.com')
-        proxy_resp._loop = loop_mock
-        proxy_req.send = send_mock = unittest.mock.Mock()
-        send_mock.return_value = proxy_resp
-        proxy_resp.start = start_mock = unittest.mock.Mock()
-        self._fake_coroutine(start_mock, unittest.mock.Mock(status=200))
-
-        connector = aiohttp.ProxyConnector(
-            'http://proxy.example.com', loop=loop_mock)
-
-        tr, proto = unittest.mock.Mock(), unittest.mock.Mock()
-        tr.get_extra_info.return_value = None
-        self._fake_coroutine(loop_mock.create_connection, (tr, proto))
-
-        req = ClientRequest('GET', 'https://www.python.org', loop=self.loop)
-        with self.assertRaisesRegex(
-                RuntimeError, "Transport does not expose socket instance"):
-            self.loop.run_until_complete(connector._create_connection(req))
-
-        proxy_req.close()
-        proxy_resp.close()
-        req.close()
-
-    @unittest.mock.patch('aiohttp.connector.ClientRequest')
-    def test_https_connect_http_proxy_error(self, ClientRequestMock):
-        loop_mock = unittest.mock.Mock()
-        proxy_req = ClientRequest('GET', 'http://proxy.example.com',
-                                  loop=loop_mock)
-        ClientRequestMock.return_value = proxy_req
-
-        proxy_resp = ClientResponse('get', 'http://proxy.example.com')
-        proxy_resp._loop = loop_mock
-        proxy_req.send = send_mock = unittest.mock.Mock()
-        send_mock.return_value = proxy_resp
-        proxy_resp.start = start_mock = unittest.mock.Mock()
-        self._fake_coroutine(
-            start_mock, unittest.mock.Mock(status=400, reason='bad request'))
-
-        connector = aiohttp.ProxyConnector(
-            'http://proxy.example.com', loop=loop_mock)
-
-        tr, proto = unittest.mock.Mock(), unittest.mock.Mock()
-        tr.get_extra_info.return_value = None
-        self._fake_coroutine(loop_mock.create_connection, (tr, proto))
-
-        req = ClientRequest('GET', 'https://www.python.org', loop=self.loop)
-        with self.assertRaisesRegex(
-                aiohttp.HttpProxyError, "400, message='bad request'"):
-            self.loop.run_until_complete(connector._create_connection(req))
-
-        proxy_req.close()
-        proxy_resp.close()
-        req.close()
-
-    @unittest.mock.patch('aiohttp.connector.ClientRequest')
-    def test_https_connect_resp_start_error(self, ClientRequestMock):
-        loop_mock = unittest.mock.Mock()
-        proxy_req = ClientRequest('GET', 'http://proxy.example.com',
-                                  loop=loop_mock)
-        ClientRequestMock.return_value = proxy_req
-
-        proxy_resp = ClientResponse('get', 'http://proxy.example.com')
-        proxy_resp._loop = loop_mock
-        proxy_req.send = send_mock = unittest.mock.Mock()
-        send_mock.return_value = proxy_resp
-        proxy_resp.start = start_mock = unittest.mock.Mock()
-        self._fake_coroutine(start_mock, OSError("error message"))
-
-        connector = aiohttp.ProxyConnector(
-            'http://proxy.example.com', loop=loop_mock)
-
-        tr, proto = unittest.mock.Mock(), unittest.mock.Mock()
-        tr.get_extra_info.return_value = None
-        self._fake_coroutine(loop_mock.create_connection, (tr, proto))
-
-        req = ClientRequest('GET', 'https://www.python.org', loop=self.loop)
-        with self.assertRaisesRegex(OSError, "error message"):
-            self.loop.run_until_complete(connector._create_connection(req))
-
-    @unittest.mock.patch('aiohttp.connector.ClientRequest')
-    def test_request_port(self, ClientRequestMock):
-        proxy_req = ClientRequest('GET', 'http://proxy.example.com',
-                                  loop=self.loop)
-        ClientRequestMock.return_value = proxy_req
-
-        loop_mock = unittest.mock.Mock()
-        connector = aiohttp.ProxyConnector('http://proxy.example.com',
-                                           loop=loop_mock)
-
-        tr, proto = unittest.mock.Mock(), unittest.mock.Mock()
-        tr.get_extra_info.return_value = None
-        self._fake_coroutine(loop_mock.create_connection, (tr, proto))
-
-        req = ClientRequest('GET', 'http://localhost:1234/path',
-                            loop=self.loop)
-        self.loop.run_until_complete(connector._create_connection(req))
-        self.assertEqual(req.path, 'http://localhost:1234/path')
-
-    def test_proxy_auth_property(self):
-        connector = aiohttp.ProxyConnector(
-            'http://proxy.example.com',
-            proxy_auth=aiohttp.helpers.BasicAuth('user', 'pass'),
-            loop=self.loop)
-        self.assertEqual(('user', 'pass', 'latin1'), connector.proxy_auth)
-        connector.close()
-
-    def test_proxy_auth_property_default(self):
-        connector = aiohttp.ProxyConnector('http://proxy.example.com',
-                                           loop=self.loop)
-        self.assertIsNone(connector.proxy_auth)
-        connector.close()
-
-    @unittest.mock.patch('aiohttp.connector.ClientRequest')
-    def test_https_connect_pass_ssl_context(self, ClientRequestMock):
-        loop_mock = unittest.mock.Mock()
-        proxy_req = ClientRequest('GET', 'http://proxy.example.com',
-                                  loop=loop_mock)
-        ClientRequestMock.return_value = proxy_req
-
-        proxy_resp = ClientResponse('get', 'http://proxy.example.com')
-        proxy_resp._loop = loop_mock
-        proxy_req.send = send_mock = unittest.mock.Mock()
-        send_mock.return_value = proxy_resp
-        proxy_resp.start = start_mock = unittest.mock.Mock()
-        self._fake_coroutine(start_mock, unittest.mock.Mock(status=200))
-
-        connector = aiohttp.ProxyConnector(
-            'http://proxy.example.com', loop=loop_mock)
-
-        tr, proto = unittest.mock.Mock(), unittest.mock.Mock()
-        self._fake_coroutine(loop_mock.create_connection, (tr, proto))
-
-        req = ClientRequest('GET', 'https://www.python.org', loop=self.loop)
-        self.loop.run_until_complete(connector._create_connection(req))
-
-        loop_mock.create_connection.assert_called_with(
-            mock.ANY,
-            ssl=connector.ssl_context,
-            sock=mock.ANY,
-            server_hostname='www.python.org')
-
-        self.assertEqual(req.path, '/')
-        self.assertEqual(proxy_req.method, 'CONNECT')
-        self.assertEqual(proxy_req.path, 'www.python.org:443')
-        tr.pause_reading.assert_called_once_with()
-        tr.get_extra_info.assert_called_with('socket', default=None)
-
-        proxy_req.close()
-        proxy_resp.close()
-        req.close()

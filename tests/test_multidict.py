@@ -16,9 +16,6 @@ from aiohttp.multidict import (MultiDictProxy,
 import aiohttp
 
 
-HAS_NO_SET_OPS_FOR_VIEW = sys.version_info < (3, 4)
-
-
 class _Root:
 
     cls = None
@@ -131,43 +128,31 @@ class _BaseTest(_Root):
         with self.assertRaises(TypeError):
             self.make_dict([(1, 2, 3)])
 
-    @unittest.skipIf(HAS_NO_SET_OPS_FOR_VIEW,
-                     "Set operations on views not supported")
     def test_keys_is_set_less(self):
         d = self.make_dict([('key', 'value1')])
 
         self.assertLess(d.keys(), {'key', 'key2'})
 
-    @unittest.skipIf(HAS_NO_SET_OPS_FOR_VIEW,
-                     "Set operations on views not supported")
     def test_keys_is_set_less_equal(self):
         d = self.make_dict([('key', 'value1')])
 
         self.assertLessEqual(d.keys(), {'key'})
 
-    @unittest.skipIf(HAS_NO_SET_OPS_FOR_VIEW,
-                     "Set operations on views not supported")
     def test_keys_is_set_equal(self):
         d = self.make_dict([('key', 'value1')])
 
         self.assertEqual(d.keys(), {'key'})
 
-    @unittest.skipIf(HAS_NO_SET_OPS_FOR_VIEW,
-                     "Set operations on views not supported")
     def test_keys_is_set_greater(self):
         d = self.make_dict([('key', 'value1')])
 
         self.assertGreater({'key', 'key2'}, d.keys())
 
-    @unittest.skipIf(HAS_NO_SET_OPS_FOR_VIEW,
-                     "Set operations on views not supported")
     def test_keys_is_set_greater_equal(self):
         d = self.make_dict([('key', 'value1')])
 
         self.assertGreaterEqual({'key'}, d.keys())
 
-    @unittest.skipIf(HAS_NO_SET_OPS_FOR_VIEW,
-                     "Set operations on views not supported")
     def test_keys_is_set_not_equal(self):
         d = self.make_dict([('key', 'value1')])
 
@@ -181,38 +166,26 @@ class _BaseTest(_Root):
         d = self.make_dict([('key', 'value1')])
         self.assertNotEqual(d, {'key': 'another_value'})
 
-    @unittest.skipIf(HAS_NO_SET_OPS_FOR_VIEW,
-                     "Set operations on views not supported")
     def test_and(self):
         d = self.make_dict([('key', 'value1')])
         self.assertEqual({'key'}, d.keys() & {'key', 'key2'})
 
-    @unittest.skipIf(HAS_NO_SET_OPS_FOR_VIEW,
-                     "Set operations on views not supported")
     def test_or(self):
         d = self.make_dict([('key', 'value1')])
         self.assertEqual({'key', 'key2'}, d.keys() | {'key2'})
 
-    @unittest.skipIf(HAS_NO_SET_OPS_FOR_VIEW,
-                     "Set operations on views not supported")
     def test_sub(self):
         d = self.make_dict([('key', 'value1'), ('key2', 'value2')])
         self.assertEqual({'key'}, d.keys() - {'key2'})
 
-    @unittest.skipIf(HAS_NO_SET_OPS_FOR_VIEW,
-                     "Set operations on views not supported")
     def test_xor(self):
         d = self.make_dict([('key', 'value1'), ('key2', 'value2')])
         self.assertEqual({'key', 'key3'}, d.keys() ^ {'key2', 'key3'})
 
-    @unittest.skipIf(HAS_NO_SET_OPS_FOR_VIEW,
-                     "Set operations on views not supported")
     def test_isdisjoint(self):
         d = self.make_dict([('key', 'value1')])
         self.assertTrue(d.keys().isdisjoint({'key2'}))
 
-    @unittest.skipIf(HAS_NO_SET_OPS_FOR_VIEW,
-                     "Set operations on views not supported")
     def test_isdisjoint2(self):
         d = self.make_dict([('key', 'value1')])
         self.assertFalse(d.keys().isdisjoint({'key'}))
@@ -221,46 +194,43 @@ class _BaseTest(_Root):
         d = self.make_dict()
         try:
             raise Exception
+            self.fail("Sould never happen")  # pragma: no cover
         except Exception as e:
             repr(d)
             self.assertIs(sys.exc_info()[1], e)
 
-    @unittest.skipIf(HAS_NO_SET_OPS_FOR_VIEW,
-                     "Set operations on views not supported")
     def test_or_issue_410(self):
         d = self.make_dict([('key', 'value')])
         try:
             raise Exception
+            self.fail("Sould never happen")  # pragma: no cover
         except Exception as e:
             d.keys() | {'other'}
             self.assertIs(sys.exc_info()[1], e)
 
-    @unittest.skipIf(HAS_NO_SET_OPS_FOR_VIEW,
-                     "Set operations on views not supported")
     def test_and_issue_410(self):
         d = self.make_dict([('key', 'value')])
         try:
             raise Exception
+            self.fail("Sould never happen")  # pragma: no cover
         except Exception as e:
             d.keys() & {'other'}
             self.assertIs(sys.exc_info()[1], e)
 
-    @unittest.skipIf(HAS_NO_SET_OPS_FOR_VIEW,
-                     "Set operations on views not supported")
     def test_sub_issue_410(self):
         d = self.make_dict([('key', 'value')])
         try:
             raise Exception
+            self.fail("Sould never happen")  # pragma: no cover
         except Exception as e:
             d.keys() - {'other'}
             self.assertIs(sys.exc_info()[1], e)
 
-    @unittest.skipIf(HAS_NO_SET_OPS_FOR_VIEW,
-                     "Set operations on views not supported")
     def test_xor_issue_410(self):
         d = self.make_dict([('key', 'value')])
         try:
             raise Exception
+            self.fail("Sould never happen")  # pragma: no cover
         except Exception as e:
             d.keys() ^ {'other'}
             self.assertIs(sys.exc_info()[1], e)
@@ -272,11 +242,11 @@ class _MultiDictTests(_BaseTest):
         d = self.make_dict()
         cls = self.proxy_cls if self.proxy_cls is not None else self.cls
 
-        self.assertEqual(str(d), "<%s {}>" % cls.__name__)
+        self.assertEqual(str(d), "<%s()>" % cls.__name__)
         d = self.make_dict([('key', 'one'), ('key', 'two')])
         self.assertEqual(
             str(d),
-            "<%s {'key': 'one', 'key': 'two'}>" % cls.__name__)
+            "<%s('key': 'one', 'key': 'two')>" % cls.__name__)
 
     def test_getall(self):
         d = self.make_dict([('key', 'value1')], key='value2')
@@ -305,17 +275,17 @@ class _MultiDictTests(_BaseTest):
     def test_items__repr__(self):
         d = self.make_dict([('key', 'value1')], key='value2')
         self.assertEqual(repr(d.items()),
-                         "_ItemsView([('key', 'value1'), ('key', 'value2')])")
+                         "_ItemsView('key': 'value1', 'key': 'value2')")
 
     def test_keys__repr__(self):
         d = self.make_dict([('key', 'value1')], key='value2')
         self.assertEqual(repr(d.keys()),
-                         "_KeysView([('key', 'value1'), ('key', 'value2')])")
+                         "_KeysView('key', 'key')")
 
     def test_values__repr__(self):
         d = self.make_dict([('key', 'value1')], key='value2')
         self.assertEqual(repr(d.values()),
-                         "_ValuesView([('key', 'value1'), ('key', 'value2')])")
+                         "_ValuesView('value1', 'value2')")
 
 
 class _CIMultiDictTests(_Root):
@@ -351,17 +321,17 @@ class _CIMultiDictTests(_Root):
     def test_items__repr__(self):
         d = self.make_dict([('KEY', 'value1')], key='value2')
         self.assertEqual(repr(d.items()),
-                         "_ItemsView([('KEY', 'value1'), ('KEY', 'value2')])")
+                         "_ItemsView('KEY': 'value1', 'KEY': 'value2')")
 
     def test_keys__repr__(self):
         d = self.make_dict([('KEY', 'value1')], key='value2')
         self.assertEqual(repr(d.keys()),
-                         "_KeysView([('KEY', 'value1'), ('KEY', 'value2')])")
+                         "_KeysView('KEY', 'KEY')")
 
     def test_values__repr__(self):
         d = self.make_dict([('KEY', 'value1')], key='value2')
         self.assertEqual(repr(d.values()),
-                         "_ValuesView([('KEY', 'value1'), ('KEY', 'value2')])")
+                         "_ValuesView('value1', 'value2')")
 
 
 class _NonProxyCIMultiDict(_CIMultiDictTests):
@@ -418,13 +388,13 @@ class _BaseMutableMultiDictTests(_BaseTest):
 
     def test__repr__(self):
         d = self.make_dict()
-        self.assertEqual(str(d), "<%s {}>" % self.cls.__name__)
+        self.assertEqual(str(d), "<%s()>" % self.cls.__name__)
 
         d = self.make_dict([('key', 'one'), ('key', 'two')])
 
         self.assertEqual(
             str(d),
-            "<%s {'key': 'one', 'key': 'two'}>" % self.cls.__name__)
+            "<%s('key': 'one', 'key': 'two')>" % self.cls.__name__)
 
     def test_getall(self):
         d = self.make_dict([('key', 'value1')], key='value2')
@@ -608,13 +578,13 @@ class _CIMutableMultiDictTests(_Root):
 
     def test__repr__(self):
         d = self.make_dict()
-        self.assertEqual(str(d), "<%s {}>" % self.cls.__name__)
+        self.assertEqual(str(d), "<%s()>" % self.cls.__name__)
 
         d = self.make_dict([('KEY', 'one'), ('KEY', 'two')])
 
         self.assertEqual(
             str(d),
-            "<%s {'KEY': 'one', 'KEY': 'two'}>" % self.cls.__name__)
+            "<%s('KEY': 'one', 'KEY': 'two')>" % self.cls.__name__)
 
     def test_add(self):
         d = self.make_dict()
