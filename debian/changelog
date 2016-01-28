@@ -1,3 +1,12 @@
+python-aiohttp (0.20.2-1) unstable; urgency=medium
+
+  * New upstream release.
+  * Replace python3-nose with python3-pytest in Build-Depends
+    and remove override_dh_auto_test from debian/rules;
+    remove no longer needed override_dh_auto_test in debian/rules
+
+ -- Piotr Ożarowski <piotr@debian.org>  Thu, 28 Jan 2016 21:42:23 +0100
+
 python-aiohttp (0.17.4-1) unstable; urgency=medium
 
   * New upstream release

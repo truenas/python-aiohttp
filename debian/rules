@@ -1,17 +1,10 @@
 #!/usr/bin/make -f
 
 export PYBUILD_NAME = aiohttp
+# enable pytest also here to make backports easier
+export PYBUILD_TEST_PYTEST=1
+export PYBUILD_TEST_ARGS={dir}/tests
 
 %:
 	dh $@ --with python3,sphinxdoc --buildsystem pybuild
 
-# Until bug #749506 in pybuild is fixed.
-PYTHON3:=$(shell py3versions -vs)
-
-override_dh_auto_test:
-ifeq (,$(findstring nocheck,$(DEB_BUILD_OPTIONS)))
-	set -e; \
-	for i in $(PYTHON3) ; do \
-		python$$i -m nose ./tests/ || true; \
-	done
-endif
