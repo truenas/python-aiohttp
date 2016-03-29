@@ -18,7 +18,7 @@ Build-Depends: debhelper (>= 9),
                python3-gunicorn
 Standards-Version: 3.9.6
 Homepage: https://aiohttp.readthedocs.org
-Vcs-Git: git://anonscm.debian.org/python-modules/packages/python-aiohttp.git
+Vcs-Git: https://anonscm.debian.org/git/python-modules/packages/python-aiohttp.git
 Vcs-Browser: https://anonscm.debian.org/cgit/python-modules/packages/python-aiohttp.git
 X-Python3-Version: >= 3.4
 
