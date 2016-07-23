@@ -11,11 +11,13 @@ import urllib.parse
 import zlib
 from http.cookies import SimpleCookie
 
+from multidict import CIMultiDict, CIMultiDictProxy, upstr
+
 import pytest
 import aiohttp
 from aiohttp import BaseConnector
+from aiohttp import helpers
 from aiohttp.client_reqrep import ClientRequest, ClientResponse
-from aiohttp.multidict import CIMultiDict, CIMultiDictProxy, upstr
 
 import os.path
 
@@ -265,13 +267,10 @@ def test_basic_auth_utf8(make_request):
     assert 'Basic bmtpbTrRgdC10LrRgNC10YI=' == req.headers['AUTHORIZATION']
 
 
-def test_basic_auth_tuple_deprecated(make_request, warning):
-    with warning(DeprecationWarning):
-        req = make_request('get', 'http://python.org',
-                           auth=('nkim', '1234'))
-
-        assert 'AUTHORIZATION' in req.headers
-        assert 'Basic bmtpbToxMjM0' == req.headers['AUTHORIZATION']
+def test_basic_auth_tuple_forbidden(make_request, warning):
+    with pytest.raises(TypeError):
+        make_request('get', 'http://python.org',
+                     auth=('nkim', '1234'))
 
 
 def test_basic_auth_from_url(make_request):
@@ -527,7 +526,7 @@ class TestClientRequest(unittest.TestCase):
 
     @unittest.mock.patch('aiohttp.client_reqrep.aiohttp')
     def test_content_encoding(self, m_http):
-        req = ClientRequest('get', 'http://python.org/',
+        req = ClientRequest('get', 'http://python.org/', data='foo',
                             compress='deflate', loop=self.loop)
         resp = req.send(self.transport, self.protocol)
         self.assertEqual(req.headers['TRANSFER-ENCODING'], 'chunked')
@@ -538,9 +537,19 @@ class TestClientRequest(unittest.TestCase):
         resp.close()
 
     @unittest.mock.patch('aiohttp.client_reqrep.aiohttp')
+    def test_content_encoding_dont_set_headers_if_no_body(self, m_http):
+        req = ClientRequest('get', 'http://python.org/',
+                            compress='deflate', loop=self.loop)
+        resp = req.send(self.transport, self.protocol)
+        self.assertNotIn('TRANSFER-ENCODING', req.headers)
+        self.assertNotIn('CONTENT-ENCODING', req.headers)
+        self.loop.run_until_complete(req.close())
+        resp.close()
+
+    @unittest.mock.patch('aiohttp.client_reqrep.aiohttp')
     def test_content_encoding_header(self, m_http):
         req = ClientRequest(
-            'get', 'http://python.org/',
+            'get', 'http://python.org/', data='foo',
             headers={'Content-Encoding': 'deflate'}, loop=self.loop)
         resp = req.send(self.transport, self.protocol)
         self.assertEqual(req.headers['TRANSFER-ENCODING'], 'chunked')
@@ -715,7 +724,7 @@ class TestClientRequest(unittest.TestCase):
         self.loop.run_until_complete(req.close())
 
     def test_data_stream_exc(self):
-        fut = asyncio.Future(loop=self.loop)
+        fut = helpers.create_future(self.loop)
 
         def gen():
             yield b'binary data'
@@ -755,7 +764,7 @@ class TestClientRequest(unittest.TestCase):
         resp.close()
 
     def test_data_stream_exc_chain(self):
-        fut = asyncio.Future(loop=self.loop)
+        fut = helpers.create_future(self.loop)
 
         def gen():
             yield from fut

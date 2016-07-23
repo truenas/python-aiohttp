@@ -1,47 +1,14 @@
 import pytest
 from unittest import mock
-from aiohttp.signals import Signal
-from aiohttp.web import Request
-from aiohttp.multidict import MultiDict, CIMultiDict
+
+from multidict import MultiDict, CIMultiDict
 from aiohttp.protocol import HttpVersion
-from aiohttp.protocol import RawRequestMessage
+from aiohttp.test_utils import make_mocked_request
 
 
 @pytest.fixture
 def make_request():
-    def maker(method, path, headers=CIMultiDict(), *,
-              version=HttpVersion(1, 1), closing=False,
-              sslcontext=None,
-              secure_proxy_ssl_header=None):
-        if version < HttpVersion(1, 1):
-            closing = True
-        app = mock.Mock()
-        app._debug = False
-        app.on_response_prepare = Signal(app)
-        message = RawRequestMessage(method, path, version, headers, closing,
-                                    False)
-        payload = mock.Mock()
-        transport = mock.Mock()
-
-        def get_extra_info(key):
-            if key == 'sslcontext':
-                return sslcontext
-            else:
-                return None
-
-        transport.get_extra_info.side_effect = get_extra_info
-        writer = mock.Mock()
-        reader = mock.Mock()
-        req = Request(app, message, payload,
-                      transport, reader, writer,
-                      secure_proxy_ssl_header=secure_proxy_ssl_header)
-
-        assert req.app is app
-        assert req.content is payload
-        assert req.transport is transport
-
-        return req
-    return maker
+    return make_mocked_request
 
 
 def test_ctor(make_request, warning):
@@ -59,10 +26,21 @@ def test_ctor(make_request, warning):
     # second call should return the same object
     assert get is req.GET
 
-    with warning(DeprecationWarning):
-        req.payload
-
     assert req.keep_alive
+
+    # just make sure that all lines of make_mocked_request covered
+    reader = mock.Mock()
+    writer = mock.Mock()
+    payload = mock.Mock()
+    transport = mock.Mock()
+    app = mock.Mock()
+    req = make_request('GET', '/path/to?a=1&b=2', writer=writer, reader=reader,
+                       payload=payload, transport=transport, app=app)
+    assert req.app is app
+    assert req.content is payload
+    assert req.transport is transport
+    assert req._reader is reader
+    assert req._writer is writer
 
 
 def test_doubleslashes(make_request):
@@ -216,6 +194,11 @@ def test___repr__(make_request):
     assert "<Request GET /path/to >" == repr(req)
 
 
+def test___repr___non_ascii_path(make_request):
+    req = make_request('GET', '/path/\U0001f415\U0001f308')
+    assert "<Request GET /path/\\U0001f415\\U0001f308 >" == repr(req)
+
+
 def test_http_scheme(make_request):
     req = make_request('GET', '/')
     assert "http" == req.scheme
@@ -238,3 +221,9 @@ def test_https_scheme_by_secure_proxy_ssl_header_false_test(make_request):
                        secure_proxy_ssl_header=('X-HEADER', '1'),
                        headers=CIMultiDict({'X-HEADER': '0'}))
     assert "http" == req.scheme
+
+
+def test_raw_headers(make_request):
+    req = make_request('GET', '/',
+                       headers=CIMultiDict({'X-HEADER': 'aaa'}))
+    assert req.raw_headers == ((b'X-HEADER', b'aaa'),)

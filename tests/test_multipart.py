@@ -7,6 +7,7 @@ import unittest.mock as mock
 import zlib
 
 import aiohttp.multipart
+from aiohttp import helpers
 from aiohttp.helpers import parse_mimetype
 from aiohttp.hdrs import (
     CONTENT_DISPOSITION,
@@ -48,7 +49,7 @@ class TestCase(unittest.TestCase, metaclass=MetaAioTestCase):
         self.loop.close()
 
     def future(self, obj):
-        fut = asyncio.Future(loop=self.loop)
+        fut = helpers.create_future(self.loop)
         fut.set_result(obj)
         return fut
 
@@ -69,9 +70,15 @@ class Stream(object):
     def read(self, size=None):
         return self.content.read(size)
 
+    def at_eof(self):
+        return self.content.tell() == len(self.content.getbuffer())
+
     @asyncio.coroutine
     def readline(self):
         return self.content.readline()
+
+    def unread_data(self, data):
+        self.content = io.BytesIO(data + self.content.read())
 
 
 class StreamWithShortenRead(Stream):
@@ -156,11 +163,87 @@ class PartReaderTestCase(TestCase):
         result = yield from obj.read_chunk()
         self.assertEqual(b'', result)
 
-    def test_read_chunk_requires_content_length(self):
+    def test_read_chunk_without_content_length(self):
         obj = aiohttp.multipart.BodyPartReader(
             self.boundary, {}, Stream(b'Hello, world!\r\n--:'))
+        c1 = yield from obj.read_chunk(8)
+        c2 = yield from obj.read_chunk(8)
+        c3 = yield from obj.read_chunk(8)
+        self.assertEqual(c1 + c2, b'Hello, world!')
+        self.assertEqual(c3, b'')
+
+    def test_read_incomplete_chunk(self):
+        stream = Stream(b'')
+
+        def prepare(data):
+            f = helpers.create_future(self.loop)
+            f.set_result(data)
+            return f
+
+        with mock.patch.object(stream, 'read', side_effect=[
+            prepare(b'Hello, '),
+            prepare(b'World'),
+            prepare(b'!\r\n--:'),
+            prepare(b'')
+        ]):
+            obj = aiohttp.multipart.BodyPartReader(
+                self.boundary, {}, stream)
+            c1 = yield from obj.read_chunk(8)
+            self.assertEqual(c1, b'Hello, ')
+            c2 = yield from obj.read_chunk(8)
+            self.assertEqual(c2, b'World')
+            c3 = yield from obj.read_chunk(8)
+            self.assertEqual(c3, b'!')
+
+    def test_read_all_at_once(self):
+        stream = Stream(b'Hello, World!\r\n--:--\r\n')
+        obj = aiohttp.multipart.BodyPartReader(self.boundary, {}, stream)
+        result = yield from obj.read_chunk()
+        self.assertEqual(b'Hello, World!', result)
+        result = yield from obj.read_chunk()
+        self.assertEqual(b'', result)
+        self.assertTrue(obj.at_eof())
+
+    def test_read_incomplete_body_chunked(self):
+        stream = Stream(b'Hello, World!\r\n-')
+        obj = aiohttp.multipart.BodyPartReader(self.boundary, {}, stream)
+        result = b''
         with self.assertRaises(AssertionError):
-            yield from obj.read_chunk()
+            for _ in range(4):
+                result += yield from obj.read_chunk(7)
+        self.assertEqual(b'Hello, World!\r\n-', result)
+
+    def test_read_boundary_with_incomplete_chunk(self):
+        stream = Stream(b'')
+
+        def prepare(data):
+            f = helpers.create_future(self.loop)
+            f.set_result(data)
+            return f
+
+        with mock.patch.object(stream, 'read', side_effect=[
+            prepare(b'Hello, World'),
+            prepare(b'!\r\n'),
+            prepare(b'--:'),
+            prepare(b'')
+        ]):
+            obj = aiohttp.multipart.BodyPartReader(
+                self.boundary, {}, stream)
+            c1 = yield from obj.read_chunk(12)
+            self.assertEqual(c1, b'Hello, World')
+            c2 = yield from obj.read_chunk(8)
+            self.assertEqual(c2, b'!')
+            c3 = yield from obj.read_chunk(8)
+            self.assertEqual(c3, b'')
+
+    def test_multi_read_chunk(self):
+        stream = Stream(b'Hello,\r\n--:\r\n\r\nworld!\r\n--:--')
+        obj = aiohttp.multipart.BodyPartReader(self.boundary, {}, stream)
+        result = yield from obj.read_chunk(8)
+        self.assertEqual(b'Hello,', result)
+        result = yield from obj.read_chunk(8)
+        self.assertEqual(b'', result)
+        self.assertTrue(obj.at_eof())
 
     def test_read_chunk_properly_counts_read_bytes(self):
         expected = b'.' * 10
@@ -557,7 +640,7 @@ class MultipartReaderTestCase(TestCase):
         self.assertTrue(second.at_eof())
         self.assertIsNone(third)
 
-    def test_read_chunk_doesnt_breaks_reader(self):
+    def test_read_chunk_by_length_doesnt_breaks_reader(self):
         reader = aiohttp.multipart.MultipartReader(
             {CONTENT_TYPE: 'multipart/related;boundary=":"'},
             Stream(b'--:\r\n'
@@ -567,12 +650,57 @@ class MultipartReaderTestCase(TestCase):
                    b'Content-Length: 6\r\n\r\n'
                    b'passed'
                    b'\r\n--:--'))
+        body_parts = []
         while True:
+            read_part = b''
             part = yield from reader.next()
             if part is None:
                 break
             while not part.at_eof():
-                yield from part.read_chunk(3)
+                read_part += yield from part.read_chunk(3)
+            body_parts.append(read_part)
+        self.assertListEqual(body_parts, [b'test', b'passed'])
+
+    def test_read_chunk_from_stream_doesnt_breaks_reader(self):
+        reader = aiohttp.multipart.MultipartReader(
+            {CONTENT_TYPE: 'multipart/related;boundary=":"'},
+            Stream(b'--:\r\n'
+                   b'\r\n'
+                   b'chunk'
+                   b'\r\n--:\r\n'
+                   b'\r\n'
+                   b'two_chunks'
+                   b'\r\n--:--'))
+        body_parts = []
+        while True:
+            read_part = b''
+            part = yield from reader.next()
+            if part is None:
+                break
+            while not part.at_eof():
+                chunk = yield from part.read_chunk(5)
+                self.assertTrue(chunk)
+                read_part += chunk
+            body_parts.append(read_part)
+        self.assertListEqual(body_parts, [b'chunk', b'two_chunks'])
+
+    def test_reading_skips_prelude(self):
+        reader = aiohttp.multipart.MultipartReader(
+            {CONTENT_TYPE: 'multipart/related;boundary=":"'},
+            Stream(b'Multi-part data is not supported.\r\n'
+                   b'\r\n'
+                   b'--:\r\n'
+                   b'\r\n'
+                   b'test\r\n'
+                   b'--:\r\n'
+                   b'\r\n'
+                   b'passed\r\n'
+                   b'--:--'))
+        first = yield from reader.next()
+        self.assertIsInstance(first, aiohttp.multipart.BodyPartReader)
+        second = yield from reader.next()
+        self.assertTrue(first.at_eof())
+        self.assertFalse(second.at_eof())
 
 
 class BodyPartWriterTestCase(unittest.TestCase):

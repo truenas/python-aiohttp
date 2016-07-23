@@ -1,4 +1,4 @@
-"""Http client functional tests."""
+"""HTTP client functional tests."""
 
 import binascii
 import gc
@@ -7,14 +7,24 @@ import os.path
 import json
 import http.cookies
 import asyncio
+import socket
 import unittest
 from unittest import mock
+
+from multidict import MultiDict
 
 import aiohttp
 from aiohttp import client, helpers
 from aiohttp import test_utils
-from aiohttp.multidict import MultiDict
 from aiohttp.multipart import MultipartWriter
+
+
+def find_unused_port():
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(('127.0.0.1', 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
 
 
 class TestHttpClientFunctional(unittest.TestCase):
@@ -625,7 +635,7 @@ class TestHttpClientFunctional(unittest.TestCase):
             with open(fname, 'rb') as f:
                 data = f.read()
 
-            fut = asyncio.Future(loop=self.loop)
+            fut = helpers.create_future(self.loop)
 
             @asyncio.coroutine
             def stream():
@@ -809,29 +819,6 @@ class TestHttpClientFunctional(unittest.TestCase):
         m_log.warning.assert_called_with('Can not load response cookies: %s',
                                          mock.ANY)
 
-    @mock.patch('aiohttp.client_reqrep.client_logger')
-    def test_share_cookies(self, m_log):
-        with test_utils.run_server(self.loop, router=Functional) as httpd:
-            with self.assertWarns(DeprecationWarning):
-                conn = aiohttp.TCPConnector(share_cookies=True, loop=self.loop)
-            resp = self.loop.run_until_complete(
-                client.request('get', httpd.url('cookies'),
-                               connector=conn, loop=self.loop))
-            self.assertIn('SET-COOKIE', resp.headers)
-            self.assertEqual(resp.cookies['c1'].value, 'cookie1')
-            self.assertEqual(resp.cookies['c2'].value, 'cookie2')
-            self.assertEqual(conn.cookies, resp.cookies)
-            resp.close()
-
-            resp2 = self.loop.run_until_complete(
-                client.request('get', httpd.url('method', 'get'),
-                               connector=conn, loop=self.loop))
-            self.assertNotIn('SET-COOKIE', resp2.headers)
-            data = self.loop.run_until_complete(resp2.json())
-            self.assertEqual(data['headers']['Cookie'],
-                             'c1=cookie1; c2=cookie2')
-            resp2.close()
-
     def test_chunked(self):
         with test_utils.run_server(self.loop, router=Functional) as httpd:
             r = self.loop.run_until_complete(
@@ -853,43 +840,17 @@ class TestHttpClientFunctional(unittest.TestCase):
             r.close()
 
     def test_request_conn_error(self):
-        self.assertRaises(
-            aiohttp.ClientConnectionError,
-            self.loop.run_until_complete,
-            client.request('get', 'http://0.0.0.0:1', loop=self.loop))
+        with self.assertRaises(aiohttp.ClientConnectionError):
+            self.loop.run_until_complete(
+                client.request('get', 'http://0.0.0.0:1', loop=self.loop))
 
     def test_request_conn_closed(self):
         with test_utils.run_server(self.loop, router=Functional) as httpd:
             httpd['close'] = True
-            self.assertRaises(
-                aiohttp.ClientHttpProcessingError,
-                self.loop.run_until_complete,
-                client.request(
-                    'get', httpd.url('method', 'get'), loop=self.loop))
-
-    def test_keepalive(self):
-        from aiohttp import connector
-        with self.assertWarns(DeprecationWarning):
-            c = connector.TCPConnector(share_cookies=True, loop=self.loop)
-
-        with test_utils.run_server(self.loop, router=Functional) as httpd:
-            r = self.loop.run_until_complete(
-                client.request('get', httpd.url('keepalive',),
-                               connector=c, loop=self.loop))
-            self.assertEqual(r.status, 200)
-            content = self.loop.run_until_complete(r.json())
-            self.assertEqual(content['content'], 'requests=1')
-            r.close()
-
-            r = self.loop.run_until_complete(
-                client.request('get', httpd.url('keepalive'),
-                               connector=c, loop=self.loop))
-            self.assertEqual(r.status, 200)
-            content = self.loop.run_until_complete(r.json())
-            self.assertEqual(content['content'], 'requests=2')
-            r.close()
-
-        c.close()
+            with self.assertRaises(aiohttp.ClientHttpProcessingError):
+                self.loop.run_until_complete(
+                    client.request('get', httpd.url('method', 'get'),
+                                   loop=self.loop))
 
     def test_session_close(self):
         conn = aiohttp.TCPConnector(loop=self.loop)
@@ -912,31 +873,6 @@ class TestHttpClientFunctional(unittest.TestCase):
             self.assertEqual(content['content'], 'requests=1')
             r.close()
 
-        conn.close()
-
-    @mock.patch('aiohttp.client_reqrep.client_logger')
-    def test_connector_cookies(self, m_log):
-        from aiohttp import connector
-        with self.assertWarns(DeprecationWarning):
-            conn = connector.TCPConnector(share_cookies=True, loop=self.loop)
-
-        with test_utils.run_server(self.loop, router=Functional) as httpd:
-            conn.update_cookies({'test': '1'})
-            r = self.loop.run_until_complete(
-                client.request('get', httpd.url('cookies'),
-                               connector=conn, loop=self.loop))
-            self.assertEqual(r.status, 200)
-            content = self.loop.run_until_complete(r.json())
-
-            self.assertEqual(content['headers']['Cookie'], 'test=1')
-            r.close()
-
-            cookies = sorted([(k, v.value) for k, v in conn.cookies.items()])
-            self.assertEqual(
-                cookies, [('c1', 'cookie1'), ('c2', 'cookie2'), ('test', '1')])
-
-        m_log.warning.assert_called_with(
-            'Can not load response cookies: %s', mock.ANY)
         conn.close()
 
     def test_multidict_headers(self):
@@ -1016,7 +952,7 @@ class TestHttpClientFunctional(unittest.TestCase):
         @asyncio.coroutine
         def go():
             server = yield from self.loop.create_server(
-                Proto, '127.0.0.1')
+                Proto, '127.0.0.1', find_unused_port())
 
             addr = server.sockets[0].getsockname()
 
@@ -1059,7 +995,7 @@ class TestHttpClientFunctional(unittest.TestCase):
         @asyncio.coroutine
         def go():
             server = yield from self.loop.create_server(
-                Proto, '127.0.0.1')
+                Proto, '127.0.0.1', find_unused_port())
 
             addr = server.sockets[0].getsockname()
 
@@ -1086,58 +1022,6 @@ class TestHttpClientFunctional(unittest.TestCase):
         self.loop.run_until_complete(go())
 
     @mock.patch('aiohttp.client_reqrep.client_logger')
-    def test_share_cookie_partial_update(self, m_log):
-        with test_utils.run_server(self.loop, router=Functional) as httpd:
-            with self.assertWarns(DeprecationWarning):
-                conn = aiohttp.TCPConnector(share_cookies=True, loop=self.loop)
-            # Set c1 and c2 cookie
-            resp = self.loop.run_until_complete(
-                client.request('get', httpd.url('cookies'),
-                               connector=conn, loop=self.loop))
-            self.assertEqual(resp.cookies['c1'].value, 'cookie1')
-            self.assertEqual(resp.cookies['c2'].value, 'cookie2')
-            self.assertEqual(conn.cookies, resp.cookies)
-            resp.close()
-
-            # Update c1 at server side
-            resp = self.loop.run_until_complete(
-                client.request('get', httpd.url('cookies_partial'),
-                               connector=conn, loop=self.loop))
-            self.assertEqual(resp.cookies['c1'].value, 'other_cookie1')
-            resp.close()
-
-            # Assert, that we send updated cookies in next requests
-            r = self.loop.run_until_complete(
-                client.request('get', httpd.url('method', 'get'),
-                               connector=conn, loop=self.loop))
-            self.assertEqual(r.status, 200)
-            content = self.loop.run_until_complete(r.json())
-            self.assertEqual(
-                content['headers']['Cookie'],
-                'c1=other_cookie1; c2=cookie2')
-            r.close()
-
-    def test_connector_cookie_merge(self):
-        with test_utils.run_server(self.loop, router=Functional) as httpd:
-            with self.assertWarns(DeprecationWarning):
-                conn = aiohttp.TCPConnector(share_cookies=True, loop=self.loop)
-            conn.update_cookies({
-                "c1": "connector_cookie1",
-                "c2": "connector_cookie2",
-            })
-            # Update c1 using direct cookies attribute of request
-            r = self.loop.run_until_complete(
-                client.request('get', httpd.url('method', 'get'),
-                               cookies={"c1": "direct_cookie1"},
-                               connector=conn, loop=self.loop))
-            self.assertEqual(r.status, 200)
-            content = self.loop.run_until_complete(r.json())
-            self.assertEqual(
-                content['headers']['Cookie'],
-                'c1=direct_cookie1; c2=connector_cookie2')
-            r.close()
-
-    @mock.patch('aiohttp.client_reqrep.client_logger')
     def test_session_cookies(self, m_log):
         with test_utils.run_server(self.loop, router=Functional) as httpd:
             session = client.ClientSession(loop=self.loop)
@@ -1146,8 +1030,11 @@ class TestHttpClientFunctional(unittest.TestCase):
                 session.request('get', httpd.url('cookies')))
             self.assertEqual(resp.cookies['c1'].value, 'cookie1')
             self.assertEqual(resp.cookies['c2'].value, 'cookie2')
-            self.assertEqual(session.cookies, resp.cookies)
             resp.close()
+
+            # Add the received cookies as shared for sending them to the test
+            # server, which is only accessible via IP
+            session.cookies.update(resp.cookies)
 
             # Assert, that we send those cookies in next requests
             r = self.loop.run_until_complete(
