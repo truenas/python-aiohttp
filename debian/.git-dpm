@@ -2,10 +2,10 @@
 f3d021a7a071ff6577d692043f9eab18f1a9eb1c
 f3d021a7a071ff6577d692043f9eab18f1a9eb1c
 f3d021a7a071ff6577d692043f9eab18f1a9eb1c
-f3d021a7a071ff6577d692043f9eab18f1a9eb1c
-python-aiohttp_0.17.4.orig.tar.gz
-22115d5390dfb4fe2ff719ae0ac4b036748f8b9e
-475034
+b5b21e001086ed12a3ca01b441622206882a3fd9
+python-aiohttp_0.22.1.orig.tar.gz
+c27a915bd30b5fa7e9907adecba79d0aab34add3
+474579
 debianTag="debian/%e%v"
 patchedTag="patched/%e%v"
 upstreamTag="upstream/%e%u"
