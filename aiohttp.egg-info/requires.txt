@@ -1,1 +1,2 @@
 chardet
+multidict>=1.1.0

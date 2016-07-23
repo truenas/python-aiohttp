@@ -5,8 +5,10 @@ import os
 import os.path
 import socket
 import unittest
+import zlib
+from multidict import MultiDict
 from aiohttp import log, web, request, FormData, ClientSession, TCPConnector
-from aiohttp.multidict import MultiDict
+from aiohttp.file_sender import FileSender
 from aiohttp.protocol import HttpVersion, HttpVersion10, HttpVersion11
 from aiohttp.streams import EOF_MARKER
 
@@ -41,15 +43,19 @@ class WebFunctionalSetupMixin:
         return port
 
     @asyncio.coroutine
-    def create_server(self, method, path, handler=None, ssl_ctx=None):
-        app = web.Application(loop=self.loop)
+    def create_server(self, method, path, handler=None, ssl_ctx=None,
+                      logger=log.server_logger, handler_kwargs=None):
+        app = web.Application(
+            loop=self.loop)
         if handler:
             app.router.add_route(method, path, handler)
 
         port = self.find_unused_port()
         self.handler = app.make_handler(
             keep_alive_on=False,
-            access_log=log.access_logger)
+            access_log=log.access_logger,
+            logger=logger,
+            **(handler_kwargs or {}))
         srv = yield from self.loop.create_server(
             self.handler, '127.0.0.1', port, ssl=ssl_ctx)
         protocol = "https" if ssl_ctx else "http"
@@ -79,6 +85,7 @@ class TestWebFunctional(WebFunctionalSetupMixin, unittest.TestCase):
         self.loop.run_until_complete(go())
 
     def test_handler_returns_not_response(self):
+        logger = mock.Mock()
 
         @asyncio.coroutine
         def handler(request):
@@ -86,13 +93,40 @@ class TestWebFunctional(WebFunctionalSetupMixin, unittest.TestCase):
 
         @asyncio.coroutine
         def go():
-            _, _, url = yield from self.create_server('GET', '/', handler)
+            _, _, url = yield from self.create_server('GET', '/', handler,
+                                                      logger=logger)
             resp = yield from request('GET', url, loop=self.loop)
             self.assertEqual(500, resp.status)
             resp.close()
 
-        with mock.patch('aiohttp.server.server_logger'):
-            self.loop.run_until_complete(go())
+        self.loop.run_until_complete(go())
+        logger.exception.assert_called_with("Error handling request")
+
+    def test_head_returns_empty_body(self):
+
+        @asyncio.coroutine
+        def handler(request):
+            body = yield from request.read()
+            self.assertEqual(b'', body)
+            return web.Response(body=b'test')
+
+        @asyncio.coroutine
+        def go():
+            _, _, url = yield from self.create_server('HEAD', '/', handler)
+            with ClientSession(loop=self.loop) as session:
+                resp = yield from session.head(url, version=HttpVersion11)
+                self.assertEqual(200, resp.status)
+                txt = yield from resp.text()
+                self.assertEqual('', txt)
+                resp.close()
+
+                resp = yield from session.head(url, version=HttpVersion11)
+                self.assertEqual(200, resp.status)
+                txt = yield from resp.text()
+                self.assertEqual('', txt)
+                resp.close()
+
+        self.loop.run_until_complete(go())
 
     def test_post_form(self):
 
@@ -142,8 +176,11 @@ class TestWebFunctional(WebFunctionalSetupMixin, unittest.TestCase):
         def handler(request):
             data = yield from request.json()
             self.assertEqual(dct, data)
-            data2 = yield from request.json()
+            data2 = yield from request.json(loads=json.loads)
             self.assertEqual(data, data2)
+            with self.assertWarns(DeprecationWarning):
+                data3 = yield from request.json(loader=json.loads)
+            self.assertEqual(data, data3)
             resp = web.Response()
             resp.content_type = 'application/json'
             resp.body = json.dumps(data).encode('utf8')
@@ -357,6 +394,32 @@ class TestWebFunctional(WebFunctionalSetupMixin, unittest.TestCase):
 
         self.loop.run_until_complete(go())
 
+    def test_expect_default_handler_unknown(self):
+        """Test default Expect handler for unknown Expect value.
+
+        A server that does not understand or is unable to comply with any of
+        the expectation values in the Expect field of a request MUST respond
+        with appropriate error status. The server MUST respond with a 417
+        (Expectation Failed) status if any of the expectations cannot be met
+        or, if there are other problems with the request, some other 4xx
+        status.
+
+        http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.20
+        """
+        @asyncio.coroutine
+        def handler(request):
+            yield from request.post()
+            self.fail('Handler should not proceed to this point in case of '
+                      'unknown Expect header')
+
+        @asyncio.coroutine
+        def go():
+            _, _, url = yield from self.create_server('POST', '/', handler)
+            resp = yield from request('POST', url, headers={'Expect': 'SPAM'},
+                                      loop=self.loop)
+            self.assertEqual(417, resp.status)
+        self.loop.run_until_complete(go())
+
     def test_100_continue(self):
         @asyncio.coroutine
         def handler(request):
@@ -520,7 +583,7 @@ class TestWebFunctional(WebFunctionalSetupMixin, unittest.TestCase):
 
         self.loop.run_until_complete(go())
 
-    def test_http10_keep_alive_default(self):
+    def test_http11_keep_alive_default(self):
 
         @asyncio.coroutine
         def handler(request):
@@ -531,9 +594,28 @@ class TestWebFunctional(WebFunctionalSetupMixin, unittest.TestCase):
         def go():
             _, _, url = yield from self.create_server('GET', '/', handler)
             resp = yield from request('GET', url, loop=self.loop,
-                                      version=HttpVersion10)
-            self.assertEqual('close', resp.headers['CONNECTION'])
+                                      version=HttpVersion11)
+            self.assertNotIn('CONNECTION', resp.headers)
             resp.close()
+
+        self.loop.run_until_complete(go())
+
+    def test_http10_keep_alive_default(self):
+
+        @asyncio.coroutine
+        def handler(request):
+            yield from request.read()
+            return web.Response(body=b'OK')
+
+        @asyncio.coroutine
+        def go():
+            _, _, url = yield from self.create_server('GET', '/', handler)
+            with ClientSession(loop=self.loop) as session:
+                resp = yield from session.get(url,
+                                              version=HttpVersion10)
+                self.assertEqual(resp.version, HttpVersion10)
+                self.assertEqual('keep-alive', resp.headers['CONNECTION'])
+                resp.close()
 
         self.loop.run_until_complete(go())
 
@@ -551,7 +633,7 @@ class TestWebFunctional(WebFunctionalSetupMixin, unittest.TestCase):
             resp = yield from request('GET', url, loop=self.loop,
                                       headers=headers,
                                       version=HttpVersion(0, 9))
-            self.assertEqual('close', resp.headers['CONNECTION'])
+            self.assertNotIn('CONNECTION', resp.headers)
             resp.close()
 
         self.loop.run_until_complete(go())
@@ -569,7 +651,7 @@ class TestWebFunctional(WebFunctionalSetupMixin, unittest.TestCase):
             headers = {'Connection': 'close'}
             resp = yield from request('GET', url, loop=self.loop,
                                       headers=headers, version=HttpVersion10)
-            self.assertEqual('close', resp.headers['CONNECTION'])
+            self.assertNotIn('CONNECTION', resp.headers)
             resp.close()
 
         self.loop.run_until_complete(go())
@@ -697,6 +779,44 @@ class TestWebFunctional(WebFunctionalSetupMixin, unittest.TestCase):
 
         self.loop.run_until_complete(go())
 
+    def test_large_header(self):
+
+        @asyncio.coroutine
+        def handler(request):
+            return web.Response()
+
+        @asyncio.coroutine
+        def go():
+            _, srv, url = yield from self.create_server('GET', '/', handler)
+            headers = {'Long-Header': 'ab' * 8129}
+            resp = yield from request('GET', url,
+                                      headers=headers,
+                                      loop=self.loop)
+            self.assertEqual(400, resp.status)
+            yield from resp.release()
+
+        self.loop.run_until_complete(go())
+
+    def test_large_header_allowed(self):
+
+        @asyncio.coroutine
+        def handler(request):
+            return web.Response()
+
+        @asyncio.coroutine
+        def go():
+            handler_kwargs = {'max_field_size': 81920}
+            _, srv, url = yield from self.create_server(
+                'GET', '/', handler, handler_kwargs=handler_kwargs)
+            headers = {'Long-Header': 'ab' * 8129}
+            resp = yield from request('GET', url,
+                                      headers=headers,
+                                      loop=self.loop)
+            self.assertEqual(200, resp.status)
+            yield from resp.release()
+
+        self.loop.run_until_complete(go())
+
     def test_get_with_empty_arg_with_equal(self):
 
         @asyncio.coroutine
@@ -713,6 +833,25 @@ class TestWebFunctional(WebFunctionalSetupMixin, unittest.TestCase):
             yield from resp.release()
 
         self.loop.run_until_complete(go())
+
+    def test_response_with_precompressed_body(self):
+        @asyncio.coroutine
+        def handler(request):
+            headers = {'Content-Encoding': 'gzip'}
+            deflated_data = zlib.compress(b'mydata')
+            return web.Response(body=deflated_data, headers=headers)
+
+        @asyncio.coroutine
+        def go():
+            _, srv, url = yield from self.create_server('GET', '/', handler)
+            client = ClientSession(loop=self.loop)
+            resp = yield from client.get(url)
+            self.assertEqual(200, resp.status)
+            data = yield from resp.read()
+            self.assertEqual(b'mydata', data)
+            self.assertEqual(resp.headers.get('CONTENT-ENCODING'), 'deflate')
+            yield from resp.release()
+            client.close()
 
     def test_stream_response_multiple_chunks(self):
         @asyncio.coroutine
@@ -733,6 +872,18 @@ class TestWebFunctional(WebFunctionalSetupMixin, unittest.TestCase):
             self.assertEqual(200, resp.status)
             data = yield from resp.read()
             self.assertEqual(b'xyz', data)
+            yield from resp.release()
+            client.close()
+
+        self.loop.run_until_complete(go())
+
+    def test_start_without_routes(self):
+        @asyncio.coroutine
+        def go():
+            _, srv, url = yield from self.create_server(None, '/', None)
+            client = ClientSession(loop=self.loop)
+            resp = yield from client.get(url)
+            self.assertEqual(404, resp.status)
             yield from resp.release()
             client.close()
 
@@ -769,6 +920,10 @@ class StaticFileMixin(WebFunctionalSetupMixin):
             resp.close()
 
             resp = yield from request('GET', url + 'fake', loop=self.loop)
+            self.assertEqual(404, resp.status)
+            resp.close()
+
+            resp = yield from request('GET', url + 'x' * 500, loop=self.loop)
             self.assertEqual(404, resp.status)
             resp.close()
 
@@ -1019,33 +1174,13 @@ class StaticFileMixin(WebFunctionalSetupMixin):
 
         self.loop.run_until_complete(go(here, filename))
 
-    def test_env_nosendfile(self):
-        directory = os.path.dirname(__file__)
-
-        with mock.patch.dict(os.environ, {'AIOHTTP_NOSENDFILE': '1'}):
-            route = web.StaticRoute(None, "/", directory)
-            self.assertEqual(route._sendfile, route._sendfile_fallback)
-
 
 class TestStaticFileSendfileFallback(StaticFileMixin,
                                      unittest.TestCase):
-
     def patch_sendfile(self, add_static):
         def f(*args, **kwargs):
             route = add_static(*args, **kwargs)
-            route._sendfile = route._sendfile_fallback
-            return route
-        return f
-
-
-@unittest.skipUnless(hasattr(os, "sendfile"),
-                     "sendfile system call not supported")
-class TestStaticFileSendfile(StaticFileMixin,
-                             unittest.TestCase):
-
-    def patch_sendfile(self, add_static):
-        def f(*args, **kwargs):
-            route = add_static(*args, **kwargs)
-            route._sendfile = route._sendfile_system
+            file_sender = FileSender()
+            file_sender._sendfile = file_sender._sendfile_fallback
             return route
         return f

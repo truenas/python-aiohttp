@@ -7,16 +7,17 @@ import os
 import sys
 import traceback
 import warnings
-import http.cookies
 import urllib.parse
+
+from multidict import MultiDictProxy, MultiDict, CIMultiDict, upstr
 
 import aiohttp
 from .client_reqrep import ClientRequest, ClientResponse
 from .errors import WSServerHandshakeError
-from .multidict import MultiDictProxy, MultiDict, CIMultiDict, upstr
+from .helpers import CookieJar
 from .websocket import WS_KEY, WebSocketParser, WebSocketWriter
 from .websocket_client import ClientWebSocketResponse
-from . import hdrs
+from . import hdrs, helpers
 
 
 __all__ = ('ClientSession', 'request', 'get', 'options', 'head',
@@ -35,7 +36,9 @@ class ClientSession:
                  headers=None, skip_auto_headers=None,
                  auth=None, request_class=ClientRequest,
                  response_class=ClientResponse,
-                 ws_response_class=ClientWebSocketResponse):
+                 ws_response_class=ClientWebSocketResponse,
+                 version=aiohttp.HttpVersion11,
+                 cookie_jar=None):
 
         if connector is None:
             connector = aiohttp.TCPConnector(loop=loop)
@@ -50,15 +53,15 @@ class ClientSession:
         if loop.get_debug():
             self._source_traceback = traceback.extract_stack(sys._getframe(1))
 
-        self._cookies = http.cookies.SimpleCookie()
+        if cookie_jar is None:
+            cookie_jar = CookieJar(loop=loop)
+        self._cookie_jar = cookie_jar
 
-        # For Backward compatability with `share_cookies` connectors
-        if connector._share_cookies:
-            self._update_cookies(connector.cookies)
         if cookies is not None:
-            self._update_cookies(cookies)
+            self._cookie_jar.update_cookies(cookies)
         self._connector = connector
         self._default_auth = auth
+        self._version = version
 
         # Convert to list of tuples
         if headers:
@@ -97,12 +100,13 @@ class ClientSession:
                 allow_redirects=True,
                 max_redirects=10,
                 encoding='utf-8',
-                version=aiohttp.HttpVersion11,
+                version=None,
                 compress=None,
                 chunked=None,
                 expect100=False,
                 read_until_eof=True):
         """Perform HTTP request."""
+
         return _RequestContextManager(
             self._request(
                 method,
@@ -131,11 +135,17 @@ class ClientSession:
                  allow_redirects=True,
                  max_redirects=10,
                  encoding='utf-8',
-                 version=aiohttp.HttpVersion11,
+                 version=None,
                  compress=None,
                  chunked=None,
                  expect100=False,
                  read_until_eof=True):
+
+        if version is not None:
+            warnings.warn("HTTP version should be specified "
+                          "by ClientSession constructor", DeprecationWarning)
+        else:
+            version = self._version
 
         if self.closed:
             raise RuntimeError('Session is closed')
@@ -163,10 +173,13 @@ class ClientSession:
                 skip_headers.add(upstr(i))
 
         while True:
+
+            cookies = self._cookie_jar.filter_cookies(url)
+
             req = self._request_class(
                 method, url, params=params, headers=headers,
                 skip_auto_headers=skip_headers, data=data,
-                cookies=self.cookies, encoding=encoding,
+                cookies=cookies, encoding=encoding,
                 auth=auth, version=version, compress=compress, chunked=chunked,
                 expect100=expect100,
                 loop=self._loop, response_class=self._response_class)
@@ -186,10 +199,7 @@ class ClientSession:
             except OSError as exc:
                 raise aiohttp.ClientOSError(*exc.args) from exc
 
-            self._update_cookies(resp.cookies)
-            # For Backward compatability with `share_cookie` connectors
-            if self._connector._share_cookies:
-                self._connector.update_cookies(resp.cookies)
+            self._cookie_jar.update_cookies(resp.cookies, resp.url)
 
             # redirects
             if resp.status in (301, 302, 303, 307) and allow_redirects:
@@ -198,6 +208,13 @@ class ClientSession:
                 if max_redirects and redirects >= max_redirects:
                     resp.close()
                     break
+                else:
+                    # TODO: close the connection if BODY is large enough
+                    # Redirect with big BODY is forbidden by HTTP protocol
+                    # but malformed server may send illegal response.
+                    # Small BODIES with text like "Not Found" are still
+                    # perfectly fine and should be accepted.
+                    yield from resp.release()
 
                 # For 301 and 302, mimic IE behaviour, now changed in RFC.
                 # Details: https://github.com/kennethreitz/requests/pull/269
@@ -218,6 +235,7 @@ class ClientSession:
                     r_url = urllib.parse.urljoin(url, r_url)
 
                 url = r_url
+                params = None
                 yield from resp.release()
                 continue
 
@@ -232,7 +250,8 @@ class ClientSession:
                    autoclose=True,
                    autoping=True,
                    auth=None,
-                   origin=None):
+                   origin=None,
+                   headers=None):
         """Initiate websocket connection."""
         return _WSRequestContextManager(
             self._ws_connect(url,
@@ -241,7 +260,8 @@ class ClientSession:
                              autoclose=autoclose,
                              autoping=autoping,
                              auth=auth,
-                             origin=origin))
+                             origin=origin,
+                             headers=headers))
 
     @asyncio.coroutine
     def _ws_connect(self, url, *,
@@ -250,16 +270,25 @@ class ClientSession:
                     autoclose=True,
                     autoping=True,
                     auth=None,
-                    origin=None):
+                    origin=None,
+                    headers=None):
 
         sec_key = base64.b64encode(os.urandom(16))
 
-        headers = {
+        if headers is None:
+            headers = CIMultiDict()
+
+        default_headers = {
             hdrs.UPGRADE: hdrs.WEBSOCKET,
             hdrs.CONNECTION: hdrs.UPGRADE,
             hdrs.SEC_WEBSOCKET_VERSION: '13',
             hdrs.SEC_WEBSOCKET_KEY: sec_key.decode(),
         }
+
+        for key, value in default_headers.items():
+            if key not in headers:
+                headers[key] = value
+
         if protocols:
             headers[hdrs.SEC_WEBSOCKET_PROTOCOL] = ','.join(protocols)
         if origin is not None:
@@ -313,6 +342,7 @@ class ClientSession:
                         break
 
             reader = resp.connection.reader.set_parser(WebSocketParser)
+            resp.connection.writer.set_tcp_nodelay(True)
             writer = WebSocketWriter(resp.connection.writer, use_mask=True)
         except Exception:
             resp.close()
@@ -326,19 +356,6 @@ class ClientSession:
                                            autoclose,
                                            autoping,
                                            self._loop)
-
-    def _update_cookies(self, cookies):
-        """Update shared cookies."""
-        if isinstance(cookies, dict):
-            cookies = cookies.items()
-
-        for name, value in cookies:
-            if isinstance(value, http.cookies.Morsel):
-                # use dict method because SimpleCookie class modifies value
-                # before Python 3.4
-                dict.__setitem__(self.cookies, name, value)
-            else:
-                self.cookies[name] = value
 
     def _prepare_headers(self, headers):
         """ Add default headers and transform it to CIMultiDict
@@ -413,6 +430,9 @@ class ClientSession:
         if not self.closed:
             self._connector.close()
             self._connector = None
+        ret = helpers.create_future(self._loop)
+        ret.set_result(None)
+        return ret
 
     @property
     def closed(self):
@@ -430,7 +450,12 @@ class ClientSession:
     @property
     def cookies(self):
         """The session cookies."""
-        return self._cookies
+        return self._cookie_jar.cookies
+
+    @property
+    def version(self):
+        """The session HTTP protocol version."""
+        return self._version
 
     def detach(self):
         """Detach connector from session without closing the former.
@@ -444,6 +469,15 @@ class ClientSession:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
+
+    if PY_35:
+        @asyncio.coroutine
+        def __aenter__(self):
+            return self
+
+        @asyncio.coroutine
+        def __aexit__(self, exc_type, exc_val, exc_tb):
+            yield from self.close()
 
 if PY_35:
     from collections.abc import Coroutine
@@ -580,7 +614,7 @@ def request(method, url, *,
             allow_redirects=True,
             max_redirects=10,
             encoding='utf-8',
-            version=aiohttp.HttpVersion11,
+            version=None,
             compress=None,
             chunked=None,
             expect100=False,
@@ -591,7 +625,7 @@ def request(method, url, *,
             response_class=None):
     """Constructs and sends a request. Returns response object.
 
-    :param str method: http method
+    :param str method: HTTP method
     :param str url: request url
     :param params: (optional) Dictionary or bytes to be sent in the query
       string of the new request
@@ -604,7 +638,7 @@ def request(method, url, *,
     :type auth: aiohttp.helpers.BasicAuth
     :param bool allow_redirects: (optional) If set to False, do not follow
       redirects
-    :param version: Request http version.
+    :param version: Request HTTP version.
     :type version: aiohttp.protocol.HttpVersion
     :param bool compress: Set to True if request has to be compressed
        with deflate encoding.
@@ -629,6 +663,7 @@ def request(method, url, *,
       >>> data = yield from resp.read()
 
     """
+    warnings.warn("Use ClientSession().request() instead", DeprecationWarning)
     if connector is None:
         connector = aiohttp.TCPConnector(loop=loop, force_close=True)
 
@@ -663,30 +698,37 @@ def request(method, url, *,
 
 
 def get(url, **kwargs):
+    warnings.warn("Use ClientSession().get() instead", DeprecationWarning)
     return request(hdrs.METH_GET, url, **kwargs)
 
 
 def options(url, **kwargs):
+    warnings.warn("Use ClientSession().options() instead", DeprecationWarning)
     return request(hdrs.METH_OPTIONS, url, **kwargs)
 
 
 def head(url, **kwargs):
+    warnings.warn("Use ClientSession().head() instead", DeprecationWarning)
     return request(hdrs.METH_HEAD, url, **kwargs)
 
 
 def post(url, **kwargs):
+    warnings.warn("Use ClientSession().post() instead", DeprecationWarning)
     return request(hdrs.METH_POST, url, **kwargs)
 
 
 def put(url, **kwargs):
+    warnings.warn("Use ClientSession().put() instead", DeprecationWarning)
     return request(hdrs.METH_PUT, url, **kwargs)
 
 
 def patch(url, **kwargs):
+    warnings.warn("Use ClientSession().patch() instead", DeprecationWarning)
     return request(hdrs.METH_PATCH, url, **kwargs)
 
 
 def delete(url, **kwargs):
+    warnings.warn("Use ClientSession().delete() instead", DeprecationWarning)
     return request(hdrs.METH_DELETE, url, **kwargs)
 
 
@@ -694,6 +736,8 @@ def ws_connect(url, *, protocols=(), timeout=10.0, connector=None, auth=None,
                ws_response_class=ClientWebSocketResponse, autoclose=True,
                autoping=True, loop=None, origin=None, headers=None):
 
+    warnings.warn("Use ClientSession().ws_connect() instead",
+                  DeprecationWarning)
     if loop is None:
         loop = asyncio.get_event_loop()
 

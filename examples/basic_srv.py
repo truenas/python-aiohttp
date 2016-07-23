@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Basic http server with minimal setup"""
+"""Basic HTTP server with minimal setup"""
 
 import aiohttp
 import aiohttp.server
@@ -37,7 +37,7 @@ if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     f = loop.create_server(
         lambda: HttpRequestHandler(debug=True, keep_alive=75),
-        '0.0.0.0', '8080')
+        '0.0.0.0', 8080)
     srv = loop.run_until_complete(f)
     print('serving on', srv.sockets[0].getsockname())
     try:

@@ -42,14 +42,6 @@ aiohttp.parsers module
     :undoc-members:
     :show-inheritance:
 
-aiohttp.protocol module
------------------------
-
-.. automodule:: aiohttp.protocol
-    :members:
-    :undoc-members:
-    :show-inheritance:
-
 aiohttp.signals module
 ----------------------
 
@@ -66,6 +58,7 @@ aiohttp.streams module
     :undoc-members:
     :show-inheritance:
 
+
 aiohttp.websocket module
 ------------------------
 
@@ -81,5 +74,6 @@ aiohttp.wsgi module
     :members:
     :undoc-members:
     :show-inheritance:
+
 
 .. disqus::

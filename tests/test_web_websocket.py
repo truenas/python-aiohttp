@@ -1,7 +1,7 @@
 import asyncio
 import unittest
 from unittest import mock
-from aiohttp import CIMultiDict
+from aiohttp import CIMultiDict, helpers
 from aiohttp.web import (
     MsgType, Request, WebSocketResponse, HTTPMethodNotAllowed, HTTPBadRequest)
 from aiohttp.protocol import RawRequestMessage, HttpVersion11
@@ -32,6 +32,8 @@ class TestWebWebSocket(unittest.TestCase):
                 headers['SEC-WEBSOCKET-PROTOCOL'] = 'chat, superchat'
 
         message = RawRequestMessage(method, path, HttpVersion11, headers,
+                                    [(k.encode('utf-8'), v.encode('utf-8'))
+                                     for k, v in headers.items()],
                                     False, False)
         self.payload = mock.Mock()
         self.transport = mock.Mock()
@@ -275,7 +277,7 @@ class TestWebWebSocket(unittest.TestCase):
         self.loop.run_until_complete(ws.prepare(req))
 
         exc = ValueError()
-        res = asyncio.Future(loop=self.loop)
+        res = helpers.create_future(self.loop)
         res.set_exception(exc)
         ws._reader.read.return_value = res
 
@@ -293,7 +295,7 @@ class TestWebWebSocket(unittest.TestCase):
         ws = WebSocketResponse()
         self.loop.run_until_complete(ws.prepare(req))
 
-        res = asyncio.Future(loop=self.loop)
+        res = helpers.create_future(self.loop)
         res.set_exception(asyncio.CancelledError())
         ws._reader.read.return_value = res
 
@@ -306,7 +308,7 @@ class TestWebWebSocket(unittest.TestCase):
         ws = WebSocketResponse()
         self.loop.run_until_complete(ws.prepare(req))
 
-        res = asyncio.Future(loop=self.loop)
+        res = helpers.create_future(self.loop)
         res.set_exception(asyncio.TimeoutError())
         ws._reader.read.return_value = res
 
@@ -320,7 +322,7 @@ class TestWebWebSocket(unittest.TestCase):
         self.loop.run_until_complete(ws.prepare(req))
 
         exc = errors.ClientDisconnectedError()
-        res = asyncio.Future(loop=self.loop)
+        res = helpers.create_future(self.loop)
         res.set_exception(exc)
         ws._reader.read.return_value = res
 
@@ -363,7 +365,7 @@ class TestWebWebSocket(unittest.TestCase):
         self.loop.run_until_complete(ws.prepare(req))
 
         exc = ValueError()
-        reader.read.return_value = asyncio.Future(loop=self.loop)
+        reader.read.return_value = helpers.create_future(self.loop)
         reader.read.return_value.set_exception(exc)
 
         self.loop.run_until_complete(ws.close())
@@ -371,7 +373,7 @@ class TestWebWebSocket(unittest.TestCase):
         self.assertIs(ws.exception(), exc)
 
         ws._closed = False
-        reader.read.return_value = asyncio.Future(loop=self.loop)
+        reader.read.return_value = helpers.create_future(self.loop)
         reader.read.return_value.set_exception(asyncio.CancelledError())
         self.assertRaises(asyncio.CancelledError,
                           self.loop.run_until_complete, ws.close())

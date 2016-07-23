@@ -3,13 +3,16 @@ import contextlib
 import gc
 import re
 import types
+import http.cookies
 from unittest import mock
+
+from multidict import CIMultiDict, MultiDict
 
 import aiohttp
 import pytest
+from aiohttp import web
 from aiohttp.client import ClientSession
 from aiohttp.connector import BaseConnector, TCPConnector
-from aiohttp.multidict import CIMultiDict, MultiDict
 
 
 @pytest.fixture
@@ -368,3 +371,43 @@ def test_request_ctx_manager_props(loop):
         assert isinstance(ctx_mgr.gi_frame, types.FrameType)
         assert not ctx_mgr.gi_running
         assert isinstance(ctx_mgr.gi_code, types.CodeType)
+
+
+@pytest.mark.run_loop
+def test_cookie_jar_usage(create_app_and_client):
+    req_url = None
+
+    jar = mock.Mock()
+    jar.filter_cookies.return_value = None
+
+    @asyncio.coroutine
+    def handler(request):
+        nonlocal req_url
+        req_url = "http://%s/" % request.host
+
+        resp = web.Response()
+        resp.set_cookie("response", "resp_value")
+        return resp
+
+    app, client = yield from create_app_and_client(
+        client_params={"cookies": {"request": "req_value"},
+                       "cookie_jar": jar}
+    )
+    app.router.add_route('GET', '/', handler)
+
+    # Updating the cookie jar with initial user defined cookies
+    jar.update_cookies.assert_called_with({"request": "req_value"})
+
+    jar.update_cookies.reset_mock()
+    yield from client.get("/")
+
+    # Filtering the cookie jar before sending the request,
+    # getting the request URL as only parameter
+    jar.filter_cookies.assert_called_with(req_url)
+
+    # Updating the cookie jar with the response cookies
+    assert jar.update_cookies.called
+    resp_cookies = jar.update_cookies.call_args[0][0]
+    assert isinstance(resp_cookies, http.cookies.SimpleCookie)
+    assert "response" in resp_cookies
+    assert resp_cookies["response"].value == "resp_value"
