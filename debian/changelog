@@ -6,6 +6,7 @@ python-aiohttp (0.22.1-1) UNRELEASED; urgency=medium
   [ Piotr Ożarowski ]
   * New upstream release
     - Add dependency on python3-multidict
+  * Standards-Version bumped to 3.9.8 (no changes needed)
 
  -- Piotr Ożarowski <piotr@debian.org>  Sat, 23 Jul 2016 15:07:00 +0200
 
