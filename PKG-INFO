@@ -1,6 +1,6 @@
 Metadata-Version: 1.1
 Name: aiohttp
-Version: 0.22.4
+Version: 1.0.1
 Summary: http client/server for asyncio
 Home-page: https://github.com/KeepSafe/aiohttp/
 Author: Andrew Svetlov
@@ -18,9 +18,8 @@ Description: http client/server for asyncio
           :target:  https://travis-ci.org/KeepSafe/aiohttp
           :align: right
         
-        .. image:: https://coveralls.io/repos/KeepSafe/aiohttp/badge.svg?branch=master&service=github
-          :target:  https://coveralls.io/github/KeepSafe/aiohttp?branch=master
-          :align: right
+        .. image:: https://codecov.io/gh/KeepSafe/aiohttp/branch/master/graph/badge.svg
+          :target: https://codecov.io/gh/KeepSafe/aiohttp
         
         .. image:: https://badge.fury.io/py/aiohttp.svg
             :target: https://badge.fury.io/py/aiohttp
@@ -46,17 +45,19 @@ Description: http client/server for asyncio
           import aiohttp
           import asyncio
         
-          async def fetch(session, url):
-              with aiohttp.Timeout(10):
+          async def fetch(session, url, *, loop):
+              with aiohttp.Timeout(10, loop=loop):
                   async with session.get(url) as response:
                       return await response.text()
         
+          async def main(loop):
+              async with aiohttp.ClientSession(loop=loop) as session:
+                  html = await fetch(session, 'http://python.org', loop=loop)
+                  print(html)
+        
           if __name__ == '__main__':
               loop = asyncio.get_event_loop()
-              with aiohttp.ClientSession(loop=loop) as session:
-                  html = loop.run_until_complete(
-                      fetch(session, 'http://python.org'))
-                  print(html)
+              loop.run_until_complete(main(loop))
         
         
         Server
@@ -78,19 +79,19 @@ Description: http client/server for asyncio
                 await ws.prepare(request)
         
                 async for msg in ws:
-                    if msg.tp == web.MsgType.text:
+                    if msg.type == web.MsgType.text:
                         ws.send_str("Hello, {}".format(msg.data))
-                    elif msg.tp == web.MsgType.binary:
+                    elif msg.type == web.MsgType.binary:
                         ws.send_bytes(msg.data)
-                    elif msg.tp == web.MsgType.close:
+                    elif msg.type == web.MsgType.close:
                         break
         
                 return ws
         
         
             app = web.Application()
-            app.router.add_route('GET', '/echo', wshandler)
-            app.router.add_route('GET', '/{name}', handle)
+            app.router.add_get('/echo', wshandler)
+            app.router.add_get('/{name}', handle)
         
             web.run_app(app)
         
@@ -102,7 +103,7 @@ Description: http client/server for asyncio
             async def coro(...):
                 ret = await f()
         
-        shoud be replaced by::
+        should be replaced by::
         
             @asyncio.coroutine
             def coro(...):
@@ -121,12 +122,17 @@ Description: http client/server for asyncio
         Requirements
         ------------
         
-        - Python >= 3.4.1
-        - chardet https://pypi.python.org/pypi/chardet
+        - Python >= 3.4.2
+        - chardet_
+        - multidict_
         
-        Optionally you may install cChardet library:
-        https://pypi.python.org/pypi/cchardet/1.0.0
+        Optionally you may install the cChardet_ and aiodns_ libraries (highly
+        recommended for sake of speed).
         
+        .. _chardet: https://pypi.python.org/pypi/chardet
+        .. _aiodns: https://pypi.python.org/pypi/aiodns
+        .. _multidict: https://pypi.python.org/pypi/multidict
+        .. _cChardet: https://pypi.python.org/pypi/cchardet
         
         License
         -------
@@ -150,128 +156,162 @@ Description: http client/server for asyncio
         CHANGES
         =======
         
-        0.22.3 (07-26-2016)
+        1.0.1 (2016-09-16)
+        ------------------
+        
+        - Restore `aiohttp.web.MsgType` alias for `aiohttp.WSMsgType` for sake
+          of backward compatibility #1178
+        
+        - Tune alabaster schema.
+        
+        - Use `text/html` content type for displaying index pages by static
+          file handler.
+        
+        - Fix `AssertionError` in static file handling #1177
+        
+        - Fix access log formats `%O` and `%b` for static file handling
+        
+        
+        1.0.0 (2016-09-16)
         -------------------
         
-        - Do not filter cookies if unsafe flag provided #1005
+        - Change default size for client session's connection pool from
+          unlimited to 20 #977
         
+        - Add IE support for cookie deletion. #994
         
-        0.22.2 (07-23-2016)
-        -------------------
+        - Remove deprecated `WebSocketResponse.wait_closed` method (BACKWARD
+          INCOMPATIBLE)
         
-        - Suppress CancelledError when Timeout raises TimeoutError #970
+        - Remove deprecated `force` parameter for `ClientResponse.close`
+          method (BACKWARD INCOMPATIBLE)
         
-        - Don't expose `aiohttp.__version__`
+        - Avoid using of mutable CIMultiDict kw param in make_mocked_request
+          #997
         
-        - Add unsafe parameter to CookieJar #968
+        - Make WebSocketResponse.close a little bit faster by avoiding new
+          task creating just for timeout measurement
         
-        - Use unsafe cookie jar in test client tools
+        - Add `proxy` and `proxy_auth` params to `client.get()` and family,
+          deprecate `ProxyConnector` #998
         
-        - Expose aiohttp.CookieJar name
+        - Add support for websocket send_json and receive_json, synchronize
+          server and client API for websockets #984
         
+        - Implement router shourtcuts for most useful HTTP methods, use
+          `app.router.add_get()`, `app.router.add_post()` etc. instead of
+          `app.router.add_route()` #986
         
-        0.22.1 (07-16-2016)
-        -------------------
+        - Support SSL connections for gunicorn worker #1003
         
-        - Large cookie expiration/max-age doesn't break an event loop from now
-          (fixes #967)
+        - Move obsolete examples to legacy folder
         
+        - Switch to multidict 2.0 and title-cased strings #1015
         
-        0.22.0 (07-15-2016)
-        -------------------
+        - `{FOO}e` logger format is case-sensitive now
         
-        - Fix bug in serving static directory #803
+        - Fix logger report for unix socket 8e8469b
         
-        - Fix command line arg parsing #797
+        - Rename aiohttp.websocket to aiohttp._ws_impl
         
-        - Fix a documentation chapter about cookie usage #790
+        - Rename aiohttp.MsgType tp aiohttp.WSMsgType
         
-        - Handle empty body with gzipped encoding #758
+        - Introduce aiohttp.WSMessage officially
         
-        - Support 451 Unavailable For Legal Reasons http status  #697
+        - Rename Message -> WSMessage
         
-        - Fix Cookie share example and few small typos in docs #817
+        - Remove deprecated decode param from resp.read(decode=True)
         
-        - UrlDispatcher.add_route with partial coroutine handler #814
+        - Use 5min default client timeout #1028
         
-        - Optional support for aiodns #728
+        - Relax HTTP method validation in UrlDispatcher #1037
         
-        - Add ServiceRestart and TryAgainLater websocket close codes #828
+        - Pin minimal supported asyncio version to 3.4.2+ (`loop.is_close()`
+          should be present)
         
-        - Fix prompt message for `web.run_app` #832
+        - Remove aiohttp.websocket module (BACKWARD IMCOMPATIBLE)
+          Please use high-level client and server approaches
         
-        - Allow to pass None as a timeout value to disable timeout logic #834
+        - Link header for 451 status code is mandatory
         
-        - Fix leak of connection slot during connection erro #835
+        - Fix test_client fixture to allow multiple clients per test #1072
         
-        - Gunicorn worker with uvloop support `aiohttp.worker.GunicornUVLoopWebWorker` #878
+        - make_mocked_request now accepts dict as headers #1073
         
-        - Don't send body in response to HEAD request #838
+        - Add Python 3.5.2/3.6+ compatibility patch for async generator
+          protocol change #1082
         
-        - Skip the preamble in MultipartReader #881
+        - Improvement test_client can accept instance object #1083
         
-        - Implement BasicAuth decode classmethod. #744
+        - Simplify ServerHttpProtocol implementation #1060
         
-        - Don't crash logger when transport is None #889
+        - Add a flag for optional showing directory index for static file
+          handling #921
         
-        - Use a create_future compatibility wrapper instead of creating
-          Futures directly #896
+        - Define `web.Application.on_startup()` signal handler #1103
         
-        - Add test utilities to aiohttp #902
+        - Drop ChunkedParser and LinesParser #1111
         
-        - Improve Request.__repr__ #875
+        - Call `Application.startup` in GunicornWebWorker #1105
         
-        - Skip DNS resolving if provided host is already an ip address #874
+        - Fix client handling hostnames with 63 bytes when a port is given in
+          the url #1044
         
-        - Add headers to ClientSession.ws_connect #785
+        - Implement proxy support for ClientSession.ws_connect #1025
         
-        - Document that server can send pre-compressed data #906
+        - Return named tuple from WebSocketResponse.can_prepare #1016
         
-        - Don't add Content-Encoding and Transfer-Encoding if no body #891
+        - Fix access_log_format in `GunicornWebWorker` #1117
         
-        - Add json() convenience methods to websocket message objects #897
+        - Setup Content-Type to application/octet-stream by default #1124
         
-        - Add client_resp.raise_for_status() #908
+        - Deprecate debug parameter from app.make_handler(), use
+          `Application(debug=True)` instead #1121
         
-        - Implement cookie filter #799
+        - Remove fragment string in request path #846
         
-        - Include an example of middleware to handle error pages #909
+        - Use aiodns.DNSResolver.gethostbyname() if available #1136
         
-        - Fix error handling in StaticFileMixin #856
+        - Fix static file sending on uvloop when sendfile is available #1093
         
-        - Add mocked request helper #900
+        - Make prettier urls if query is empty dict #1143
         
-        - Fix empty ALLOW Response header for cls based View #929
+        - Fix redirects for HEAD requests #1147
         
-        - Respect CONNECT method to implement a proxy server #847
+        - Default value for `StreamReader.read_nowait` is -1 from now #1150
         
-        - Add pytest_plugin #914
+        - `aiohttp.StreamReader` is not inherited from `asyncio.StreamReader` from now
+          (BACKWARD INCOMPATIBLE) #1150
         
-        - Add tutorial
+        - Streams documentation added #1150
         
-        - Add backlog option to support more than 128 (default value in
-          "create_server" function) concurrent connections #892
+        - Add `multipart` coroutine method for web Request object #1067
         
-        - Allow configuration of header size limits #912
+        - Publish ClientSession.loop property #1149
         
-        - Separate sending file logic from StaticRoute dispatcher #901
+        - Fix static file with spaces #1140
         
-        - Drop deprecated share_cookies connector option (BACKWARD INCOMPATIBLE)
+        - Fix piling up asyncio loop by cookie expiration callbacks #1061
         
-        - Drop deprecated support for tuple as auth paramter.
-          Use aiohttp.BasicAuth instead (BACKWARD INCOMPATIBLE)
+        - Drop `Timeout` class for sake of `async_timeout` external library.
+          `aiohttp.Timeout` is an alias for `async_timeout.timeout`
         
-        - Remove deprecated `request.payload` property, use `content` instead.
-          (BACKWARD INCOMPATIBLE)
+        - `use_dns_cache` parameter of `aiohttp.TCPConnector` is `True` by
+          default (BACKWARD INCOMPATIBLE) #1152
         
-        - Drop all mentions about api changes in documentaion for versions
-          older than 0.16
+        - `aiohttp.TCPConnector` uses asynchronous DNS resolver if available by
+          default (BACKWARD INCOMPATIBLE) #1152
         
-        - Allow to override default cookie jar #963
+        - Conform to RFC3986 - do not include url fragments in client requests #1174
         
-        - Add manylinux wheel builds
+        - Drop `ClientSession.cookies` (BACKWARD INCOMPATIBLE) #1173
         
-        - Dup a socket for sendfile usage #964
+        - Refactor `AbstractCookieJar` public API (BACKWARD INCOMPATIBLE) #1173
+        
+        - Fix clashing cookies with have the same name but belong to different
+          domains (BACKWARD INCOMPATIBLE) #1125
+        
+        - Support binary Content-Transfer-Encoding #1169
 Platform: UNKNOWN
 Classifier: License :: OSI Approved :: Apache Software License
 Classifier: Intended Audience :: Developers

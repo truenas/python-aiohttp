@@ -4,7 +4,6 @@ HTTP Client Reference
 =====================
 
 .. module:: aiohttp
-
 .. currentmodule:: aiohttp
 
 
@@ -29,9 +28,14 @@ Usage example::
              assert resp.status == 200
              return await resp.text()
 
-     with aiohttp.ClientSession() as client:
-         html = asyncio.get_event_loop().run_until_complete(fetch(client))
-         print(html)
+     async def main(loop):
+         async with aiohttp.ClientSession(loop=loop) as client:
+             html = await fetch(client)
+             print(html)
+
+     loop = asyncio.get_event_loop()
+     loop.run_until_complete(main(loop))
+
 
 .. versionadded:: 0.17
 
@@ -39,10 +43,8 @@ The client session supports the context manager protocol for self closing.
 
 .. class:: ClientSession(*, connector=None, loop=None, cookies=None, \
                          headers=None, skip_auto_headers=None, \
-                         auth=None, request_class=ClientRequest, \
-                         response_class=ClientResponse, \
-                         ws_response_class=ClientWebSocketResponse,
-                         version=aiohttp.HttpVersion11,
+                         auth=None, \
+                         version=aiohttp.HttpVersion11, \
                          cookie_jar=None)
 
    The class for creating client sessions and making requests.
@@ -83,18 +85,6 @@ The client session supports the context manager protocol for self closing.
    :param aiohttp.BasicAuth auth: an object that represents HTTP Basic
                                   Authorization (optional)
 
-   :param request_class: Request class implementation. ``ClientRequest`` by
-                         default.
-
-   :param response_class: Response class
-                          implementation. :class:`ClientResponse` by
-                          default.
-
-   :param ws_response_class: WebSocketResponse class implementation.
-                             ``ClientWebSocketResponse`` by default.
-
-                             .. versionadded:: 0.16
-
    :param version: supported HTTP version, ``HTTP 1.1`` by default.
 
       .. versionadded:: 0.21
@@ -110,11 +100,10 @@ The client session supports the context manager protocol for self closing.
 
       .. versionadded:: 0.22
 
-   .. versionchanged:: 0.16
-      *request_class* default changed from ``None`` to ``ClientRequest``
+   .. versionchanged:: 1.0
 
-   .. versionchanged:: 0.16
-      *response_class* default changed from ``None`` to :class:`ClientResponse`
+      ``.cookies`` attribute was dropped. Use :attr:`cookie_jar`
+      instead.
 
    .. attribute:: closed
 
@@ -129,13 +118,21 @@ The client session supports the context manager protocol for self closing.
 
       A read-only property.
 
-   .. attribute:: cookies
+   .. attribute:: cookie_jar
 
-      The session cookies, :class:`http.cookies.SimpleCookie` instance.
+      The session cookies, :class:`~aiohttp.AbstractCookieJar` instance.
 
-      A read-only property. Overriding `session.cookies = new_val` is
-      forbidden, but you may modify the object in-place if needed.
+      Gives access to cookie jar's content and modifiers.
 
+      A read-only property.
+
+      .. versionadded:: 1.0
+
+   .. attribute:: loop
+
+      A loop instance used for session creation.
+
+      A read-only property.
 
    .. comethod:: request(method, url, *, params=None, data=None,\
                          headers=None, skip_auto_headers=None, \
@@ -143,7 +140,9 @@ The client session supports the context manager protocol for self closing.
                          max_redirects=10, encoding='utf-8',\
                          version=HttpVersion(major=1, minor=1),\
                          compress=None, chunked=None, expect100=False,\
-                         read_until_eof=True)
+                         read_until_eof=True,\
+                         proxy=None, proxy_auth=None,\
+                         timeout=5*60)
       :async-with:
       :coroutine:
 
@@ -209,8 +208,23 @@ The client session supports the context manager protocol for self closing.
                                   does not have Content-Length header.
                                   ``True`` by default (optional).
 
+      :param str proxy: Proxy URL (optional)
+
+      :param aiohttp.BasicAuth proxy_auth: an object that represents proxy HTTP
+                                           Basic Authorization (optional)
+
+      :param int timeout: a timeout for IO operations, 5min by default.
+
+                          Use ``None`` or ``0`` to disable timeout checks.
+
       :return ClientResponse: a :class:`client response
                               <ClientResponse>` object.
+
+      .. versionadded:: 1.0
+
+         Added ``proxy`` and ``proxy_auth`` parameters.
+
+         Added ``timeout`` parameter.
 
    .. comethod:: get(url, *, allow_redirects=True, **kwargs)
       :async-with:
@@ -343,7 +357,8 @@ The client session supports the context manager protocol for self closing.
                             auth=None,\
                             autoclose=True,\
                             autoping=True,\
-                            origin=None)
+                            origin=None, \
+                            proxy=None, proxy_auth=None)
       :async-with:
       :coroutine:
 
@@ -368,6 +383,11 @@ The client session supports the context manager protocol for self closing.
 
       :param str origin: Origin header to send to server
 
+      :param str proxy: Proxy URL (optional)
+
+      :param aiohttp.BasicAuth proxy_auth: an object that represents proxy HTTP
+                                           Basic Authorization (optional)
+
       .. versionadded:: 0.16
 
          Add :meth:`ws_connect`.
@@ -379,6 +399,10 @@ The client session supports the context manager protocol for self closing.
       .. versionadded:: 0.19
 
          Add *origin* parameter.
+
+      .. versionadded:: 1.0
+
+         Added ``proxy`` and ``proxy_auth`` parameters.
 
    .. comethod:: close()
 
@@ -418,8 +442,7 @@ certification chaining.
                        version=HttpVersion(major=1, minor=1), \
                        compress=None, chunked=None, expect100=False, \
                        connector=None, loop=None,\
-                       read_until_eof=True, request_class=None,\
-                       response_class=None)
+                       read_until_eof=True)
 
    Perform an asynchronous HTTP request. Return a response object
    (:class:`ClientResponse` or derived from).
@@ -467,10 +490,6 @@ certification chaining.
                                does not have Content-Length header.
                                ``True`` by default (optional).
 
-   :param request_class: Custom Request class implementation (optional)
-
-   :param response_class: Custom Response class implementation (optional)
-
    :param loop: :ref:`event loop<asyncio-event-loop>`
                 used for processing HTTP requests.
                 If param is ``None``, :func:`asyncio.get_event_loop`
@@ -481,14 +500,14 @@ certification chaining.
 
    :return ClientResponse: a :class:`client response <ClientResponse>` object.
 
-Usage::
+   Usage::
 
-     import aiohttp
+      import aiohttp
 
-     async def fetch():
-         async with aiohttp.request('GET', 'http://python.org/') as resp:
-             assert resp.status == 200
-             print(await resp.text())
+      async def fetch():
+          async with aiohttp.request('GET', 'http://python.org/') as resp:
+              assert resp.status == 200
+              print(await resp.text())
 
    .. deprecated:: 0.21
 
@@ -512,7 +531,7 @@ Usage::
 
 .. coroutinefunction:: options(url, **kwargs)
 
-   Perform a OPTIONS request.
+   Perform an OPTIONS request.
 
    :param str url: Requested URL.
 
@@ -602,7 +621,6 @@ Usage::
 
 .. coroutinefunction:: ws_connect(url, *, protocols=(), \
                                   timeout=10.0, connector=None, auth=None,\
-                                  ws_response_class=ClientWebSocketResponse,\
                                   autoclose=True, autoping=True, loop=None,\
                                   origin=None, headers=None)
 
@@ -617,11 +635,6 @@ Usage::
    :param float timeout: Timeout for websocket read. 10 seconds by default
 
    :param obj connector: object :class:`TCPConnector`
-
-   :param ws_response_class: WebSocketResponse class implementation.
-                             ``ClientWebSocketResponse`` by default.
-
-                             .. versionadded:: 0.16
 
    :param bool autoclose: Automatically close websocket connection
                           on close message from server. If `autoclose` is
@@ -674,7 +687,7 @@ There are standard connectors:
 
 1. :class:`TCPConnector` for regular *TCP sockets* (both *HTTP* and
    *HTTPS* schemes supported).
-2. :class:`ProxyConnector` for connecting via HTTP proxy.
+2. :class:`ProxyConnector` for connecting via HTTP proxy (deprecated).
 3. :class:`UnixConnector` for connecting via UNIX socket (it's used mostly for
    testing purposes).
 
@@ -690,7 +703,7 @@ BaseConnector
 ^^^^^^^^^^^^^
 
 .. class:: BaseConnector(*, conn_timeout=None, keepalive_timeout=30, \
-                         limit=None, \
+                         limit=20, \
                          force_close=False, loop=None)
 
    Base class for all connectors.
@@ -719,6 +732,13 @@ BaseConnector
       is used for getting default event loop, but we strongly
       recommend to use explicit loops everywhere.
       (optional)
+
+   .. versionchanged:: 1.0
+
+      ``limit`` changed from unlimited (``None``) to 20.
+      Expect a max of up to 20 connections to the same endpoint,
+      if it is not specified.
+      For limitless connections, pass `None` explicitly.
 
    .. attribute:: closed
 
@@ -781,11 +801,12 @@ TCPConnector
 ^^^^^^^^^^^^
 
 .. class:: TCPConnector(*, verify_ssl=True, fingerprint=None,\
-                        use_dns_cache=False, \
+                        use_dns_cache=True, \
                         family=0, \
                         ssl_context=None, conn_timeout=None, \
                         keepalive_timeout=30, limit=None, \
-                        force_close=False, loop=None, local_addr=None)
+                        force_close=False, loop=None, local_addr=None,
+                        resolver=None)
 
    Connector for working with *HTTP* and *HTTPS* via *TCP* sockets.
 
@@ -809,7 +830,7 @@ TCPConnector
 
         .. versionadded:: 0.16
 
-   :param bool use_dns_cache: use internal cache for DNS lookups, ``False``
+   :param bool use_dns_cache: use internal cache for DNS lookups, ``True``
       by default.
 
       Enabling an option *may* speedup connection
@@ -818,14 +839,23 @@ TCPConnector
 
       .. versionadded:: 0.17
 
-   :param aiohttp.abc.AbstractResolver resolver: Custom resolver instance to use.
-      ``aiohttp.resolver.DefaultResolver`` by default.
+      .. versionchanged:: 1.0
 
-      Custom resolvers allow to resolve hostnames differently than the way the
-      host is configured. Alternate resolvers include aiodns, which does not rely
-      on a thread executor.
+         The default is changed to ``True``
+
+   :param aiohttp.abc.AbstractResolver resolver: Custom resolver
+      instance to use.  ``aiohttp.DefaultResolver`` by
+      default (asynchronous if ``aiodns>=1.1`` is installed).
+
+      Custom resolvers allow to resolve hostnames differently than the
+      way the host is configured.
 
       .. versionadded:: 0.22
+
+      .. versionchanged:: 1.0
+
+         The resolver is ``aiohttp.AsyncResolver`` now if
+         :term:`aiodns` is installed.
 
    :param bool resolve: alias for *use_dns_cache* parameter.
 
@@ -940,6 +970,11 @@ ProxyConnector
    through *HTTP proxy*.
 
    :class:`ProxyConnector` is inherited from :class:`TCPConnector`.
+
+   .. deprecated:: 1.0
+
+      Use :meth:`ClientSession.request` with :attr:`proxy` and
+      :attr:`proxy_auth` parameters.
 
    Usage::
 
@@ -1108,9 +1143,7 @@ Response object
 
    .. attribute:: content
 
-      Payload stream, contains response's BODY (:class:`StreamReader`
-      compatible instance, most likely
-      :class:`FlowControlStreamReader` one).
+      Payload stream, contains response's BODY (:class:`StreamReader`).
 
    .. attribute:: cookies
 
@@ -1217,7 +1250,7 @@ manually.
    .. attribute:: closed
 
       Read-only property, ``True`` if :meth:`close` has been called of
-      :const:`~aiohttp.websocket.MSG_CLOSE` message has been received from peer.
+      :const:`~aiohttp.WSMsgType.CLOSE` message has been received from peer.
 
    .. attribute:: protocol
 
@@ -1232,7 +1265,7 @@ manually.
 
    .. method:: ping(message=b'')
 
-      Send :const:`~aiohttp.websocket.MSG_PING` to peer.
+      Send :const:`~aiohttp.WSMsgType.PING` to peer.
 
       :param message: optional payload of *ping* message,
                       :class:`str` (converted to *UTF-8* encoded bytes)
@@ -1240,7 +1273,7 @@ manually.
 
    .. method:: send_str(data)
 
-      Send *data* to peer as :const:`~aiohttp.websocket.MSG_TEXT` message.
+      Send *data* to peer as :const:`~aiohttp.WSMsgType.TEXT` message.
 
       :param str data: data to send.
 
@@ -1248,17 +1281,34 @@ manually.
 
    .. method:: send_bytes(data)
 
-      Send *data* to peer as :const:`~aiohttp.websocket.MSG_BINARY` message.
+      Send *data* to peer as :const:`~aiohttp.WSMsgType.BINARY` message.
 
       :param data: data to send.
 
       :raise TypeError: if data is not :class:`bytes`,
                         :class:`bytearray` or :class:`memoryview`.
 
+   .. method:: send_json(data, *, dumps=json.loads)
+
+      Send *data* to peer as JSON string.
+
+      :param data: data to send.
+
+      :param callable dumps: any :term:`callable` that accepts an object and
+                             returns a JSON string
+                             (:func:`json.dumps` by default).
+
+      :raise RuntimeError: if connection is not started or closing
+
+      :raise ValueError: if data is not serializable object
+
+      :raise TypeError: if value returned by ``dumps(data)`` is not
+                        :class:`str`
+
    .. comethod:: close(*, code=1000, message=b'')
 
       A :ref:`coroutine<coroutine>` that initiates closing handshake by sending
-      :const:`~aiohttp.websocket.MSG_CLOSE` message. It waits for
+      :const:`~aiohttp.WSMsgType.CLOSE` message. It waits for
       close response from server. It add timeout to `close()` call just wrap
       call with `asyncio.wait()` or `asyncio.wait_for()`.
 
@@ -1274,16 +1324,50 @@ manually.
       message from peer and returns it.
 
       The coroutine implicitly handles
-      :const:`~aiohttp.websocket.MSG_PING`,
-      :const:`~aiohttp.websocket.MSG_PONG` and
-      :const:`~aiohttp.websocket.MSG_CLOSE` without returning the
+      :const:`~aiohttp.WSMsgType.PING`,
+      :const:`~aiohttp.WSMsgType.PONG` and
+      :const:`~aiohttp.WSMsgType.CLOSE` without returning the
       message.
 
       It process *ping-pong game* and performs *closing handshake* internally.
 
-      :return: :class:`~aiohttp.websocket.Message`, `tp` is types of
-         `~aiohttp.MsgType`
+      :return: :class:`~aiohttp.WSMessage`, `tp` is a type from
+         :class:`~aiohttp.WSMsgType` enumeration.
 
+   .. coroutinemethod:: receive_str()
+
+      A :ref:`coroutine<coroutine>` that calls :meth:`receive` but
+      also asserts the message type is
+      :const:`~aiohttp.WSMsgType.TEXT`.
+
+      :return str: peer's message content.
+
+      :raise TypeError: if message is :const:`~aiohttp.WSMsgType.BINARY`.
+
+   .. coroutinemethod:: receive_bytes()
+
+      A :ref:`coroutine<coroutine>` that calls :meth:`receive` but
+      also asserts the message type is
+      :const:`~aiohttp.WSMsgType.BINARY`.
+
+      :return bytes: peer's message content.
+
+      :raise TypeError: if message is :const:`~aiohttp.WSMsgType.TEXT`.
+
+   .. coroutinemethod:: receive_json(*, loads=json.loads)
+
+      A :ref:`coroutine<coroutine>` that calls :meth:`receive_str` and loads
+      the JSON string to a Python dict.
+
+      :param callable loads: any :term:`callable` that accepts
+                              :class:`str` and returns :class:`dict`
+                              with parsed JSON (:func:`json.loads` by
+                              default).
+
+      :return dict: loaded JSON content
+
+      :raise TypeError: if message is :const:`~aiohttp.WSMsgType.BINARY`.
+      :raise ValueError: if message is not valid JSON.
 
 Utilities
 ---------
@@ -1323,4 +1407,60 @@ BasicAuth
       :return: encoded authentication data, :class:`str`.
 
 
+CookieJar
+^^^^^^^^^
+
+.. class:: CookieJar(unsafe=False, loop=None)
+
+   The cookie jar instance is available as :attr:`ClientSession.cookie_jar`.
+
+   The jar contains :class:`~http.cookies.Morsel` items for storing
+   internal cookie data.
+
+   API provides a count of saved cookies::
+
+       len(session.cookie_jar)
+
+   These cookies may be iterated over::
+
+       for cookie in session.cookie_jar:
+           print(cookie.key)
+           print(cookie["domain"])
+
+   The class implements :class:`collections.abc.Iterable`,
+   :class:`collections.abc.Sized` and
+   :class:`aiohttp.AbstractCookieJar` interfaces.
+
+   Implements cookie storage adhering to RFC 6265.
+
+   :param bool unsafe: (optional) Whether to accept cookies from IPs.
+
+   :param bool loop: an :ref:`event loop<asyncio-event-loop>` instance.
+      See :class:`aiohttp.abc.AbstractCookieJar`
+
+   .. method:: update_cookies(cookies, response_url=None)
+
+      Update cookies returned by server in ``Set-Cookie`` header.
+
+      :param cookies: a :class:`collections.abc.Mapping`
+         (e.g. :class:`dict`, :class:`~http.cookies.SimpleCookie`) or
+         *iterable* of *pairs* with cookies returned by server's
+         response.
+
+      :param str response_url: URL of response, ``None`` for *shared
+         cookies*.  Regular cookies are coupled with server's URL and
+         are sent only to this server, shared ones are sent in every
+         client request.
+
+   .. method:: filter_cookies(request_url)
+
+      Return jar's cookies acceptable for URL and available in
+      ``Cookie`` header for sending client requests for given URL.
+
+      :param str response_url: request's URL for which cookies are asked.
+
+      :return: :class:`http.cookies.SimpleCookie` with filtered
+         cookies for given URL.
+
 .. disqus::
+  :title: aiohttp client reference
