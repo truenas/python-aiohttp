@@ -17,6 +17,8 @@ autogenerates
 autogeneration
 awaitable
 BaseEventLoop
+backend
+backends
 basename
 BasicAuth
 BodyPartReader
@@ -49,8 +51,8 @@ dict
 Dict
 django
 Django
-DNSResolver
 dns
+DNSResolver
 Dup
 elasticsearch
 encodings
@@ -61,6 +63,7 @@ epoll
 fallback
 filename
 finalizers
+frontend
 getall
 gethostbyname
 github
@@ -80,12 +83,13 @@ infos
 inline
 io
 ip
-ipdb
 IP
+ipdb
 IPv
 ish
 iterable
 iterables
+Jinja
 javascript
 json
 keepalive
@@ -130,9 +134,9 @@ params
 parsers
 pathlib
 ping
-pipelining
 pluggable
 plugin
+Postgres
 poller
 pong
 pre
@@ -154,6 +158,7 @@ regex
 regexps
 regexs
 renderer
+renderers
 repo
 repr
 RequestContextManager
@@ -174,7 +179,13 @@ subpackage
 subprotocol
 subprotocols
 subtype
+Supervisord
+supervisord
+Systemd
+Runit
 Svetlov
+symlink
+symlinks
 syscall
 syscalls
 TCP
@@ -188,6 +199,7 @@ toolbar
 toplevel
 tp
 tuples
+UI
 un
 unittest
 Unittest

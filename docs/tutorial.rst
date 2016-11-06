@@ -75,6 +75,22 @@ Getting started with aiohttp first app
 
 This tutorial based on Django polls tutorial.
 
+
+Application
+-----------
+
+All aiohttp server is built around :class:`aiohttp.web.Application` instance.
+It is used for registering *startup*/*cleanup* signals, connecting routes etc.
+
+The following code creates an application::
+
+   import asyncio
+   from aiohttp import web
+
+   loop = asyncio.get_event_loop()
+   app = web.Application(loop=loop)
+
+
 .. _aiohttp-tutorial-config:
 
 Configuration files
@@ -111,11 +127,18 @@ Thus we **suggest** to use the following approach:
       parameter, e.g. ``./run_app --config=/opt/config/app_cfg.yaml``.
 
    4. Applying strict validation checks to loaded dict. `trafaret
-      <https://github.com/Deepwalker/trafaret>`_, `collander
+      <http://trafaret.readthedocs.io/en/latest/>`_, `colander
       <http://docs.pylonsproject.org/projects/colander/en/latest/>`_
       or `JSON schema
       <http://python-jsonschema.readthedocs.io/en/latest/>`_ are good
       candidates for such job.
+
+
+Load config and push into into application::
+
+    # load config from yaml file in current dir
+    conf = load_config(str(pathlib.Path('.') / 'config' / 'polls.yaml'))
+    app['config'] = conf
 
 .. _aiohttp-tutorial-database:
 
@@ -191,9 +214,45 @@ and second table is choice table:
 | question_id   |
 +---------------+
 
-TBD: aiopg.sa.create_engine and pushing it into app's storage
+Creating connection engine
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-TBD: graceful cleanup
+For making DB queries we need an engine instance. Assuming ``conf`` is
+a :class:`dict` with configuration info Postgres connection could be
+done by the following coroutine::
+
+   async def init_pg(app):
+       conf = app['config']
+       engine = await aiopg.sa.create_engine(
+           database=conf['database'],
+           user=conf['user'],
+           password=conf['password'],
+           host=conf['host'],
+           port=conf['port'],
+           minsize=conf['minsize'],
+           maxsize=conf['maxsize'],
+           loop=app.loop)
+       app['db'] = engine
+
+The best place for connecting to DB is
+:attr:`~aiohtp.web.Application.on_startup` signal::
+
+   app.on_startup.append(init_pg)
+
+
+Graceful shutdown
+^^^^^^^^^^^^^^^^^
+
+There is a good practice to close all resources on program exit.
+
+Let's close DB connection in :attr:`~aiohtp.web.Application.on_cleanup` signal::
+
+   async def close_pg(app):
+       app['db'].close()
+       await app['db'].wait_closed()
+
+
+   app.on_cleanup.append(close_pg)
 
 
 .. _aiohttp-tutorial-views:
@@ -294,10 +353,72 @@ Fortunately it can be done easy by single call::
 where ``project_root`` is the path to root folder.
 
 
+.. _aiohttp-tutorial-middlewares:
+
 Middlewares
 -----------
 
-TBD
+Middlewares are stacked around every web-handler.  They are called
+*before* handler for pre-processing request and *after* getting
+response back for post-processing given response.
+
+Here we'll add a simple middleware for displaying pretty looking pages
+for *404 Not Found* and *500 Internal Error*.
+
+Middlewares could be registered in ``app`` by adding new middleware to
+``app.middlewares`` list::
+
+   def setup_middlewares(app):
+       error_middleware = error_pages({404: handle_404,
+                                       500: handle_500})
+       app.middlewares.append(error_middleware)
+
+Middleware itself is a factory which accepts *application* and *next
+handler* (the following middleware or *web-handler* in case of the
+latest middleware in the list).
+
+The factory returns *middleware handler* which has the same signature
+as regular *web-handler* -- it accepts *request* and returns
+*response*.
+
+Middleware for processing HTTP exceptions::
+
+   def error_pages(overrides):
+       async def middleware(app, handler):
+           async def middleware_handler(request):
+               try:
+                   response = await handler(request)
+                   override = overrides.get(response.status)
+                   if override is None:
+                       return response
+                   else:
+                       return await override(request, response)
+               except web.HTTPException as ex:
+                   override = overrides.get(ex.status)
+                   if override is None:
+                       raise
+                   else:
+                       return await override(request, ex)
+           return middleware_handler
+       return middleware
+
+Registered overrides are trivial Jinja2 template renderers::
+
+
+   async def handle_404(request, response):
+       response = aiohttp_jinja2.render_template('404.html',
+                                                 request,
+                                                 {})
+       return response
+
+
+   async def handle_500(request, response):
+       response = aiohttp_jinja2.render_template('500.html',
+                                                 request,
+                                                 {})
+       return response
+
+.. seealso:: :ref:`aiohttp-web-middlewares`
 
 .. disqus::
   :title: aiohttp server tutorial

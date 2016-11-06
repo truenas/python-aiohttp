@@ -3,8 +3,8 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-aiohttp
-=======
+aiohttp: Asynchronous HTTP Client/Server
+========================================
 
 HTTP client/server for :term:`asyncio` (:pep:`3156`).
 
@@ -35,6 +35,14 @@ replacement for :term:`chardet`:
 
    $ pip install cchardet
 
+For speeding up DNS resolving by client API you may install
+:term:`aiodns` as well.
+This option is highly recommended:
+
+.. code-block:: bash
+
+   $ pip install aiodns
+
 Getting Started
 ---------------
 
@@ -64,9 +72,10 @@ Server example::
     async def handle(request):
         name = request.match_info.get('name', "Anonymous")
         text = "Hello, " + name
-        return web.Response(body=text.encode('utf-8'))
+        return web.Response(text=text)
 
     app = web.Application()
+    app.router.add_get('/', handle)
     app.router.add_get('/{name}', handle)
 
     web.run_app(app)
@@ -113,10 +122,11 @@ Dependencies
 ------------
 
 - Python 3.4.2+
-- *chardet* library
-- *multidict* library
-- *async_timeout* library
-- *Optional* :term:`cchardet` library as faster replacement for
+- *chardet*
+- *multidict*
+- *async_timeout*
+- *yarl*
+- *Optional* :term:`cchardet` as faster replacement for
   :term:`chardet`.
 
   Install it explicitly via:
@@ -125,7 +135,7 @@ Dependencies
 
      $ pip install cchardet
 
-- *Optional* :term:`aiodns` library for fast DNS resolving. The
+- *Optional* :term:`aiodns` for fast DNS resolving. The
   library is highly recommended.
 
   .. code-block:: bash
@@ -195,9 +205,9 @@ Contents
    api
    logging
    testing
-   gunicorn
+   deployment
    faq
-   new_router
+   essays
    contributing
    changes
    glossary
