@@ -1,8 +1,8 @@
-python-aiohttp (1.0.1-1) UNRELEASED; urgency=medium
+python-aiohttp (1.1.1-1) UNRELEASED; urgency=medium
 
   * New upstream release
 
- -- Piotr Ożarowski <piotr@debian.org>  Wed, 21 Sep 2016 00:01:20 +0200
+ -- Piotr Ożarowski <piotr@debian.org>  Sun, 06 Nov 2016 15:13:03 +0100
 
 python-aiohttp (0.22.4-1) unstable; urgency=medium
 
