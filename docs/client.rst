@@ -342,7 +342,7 @@ calculate the file SHA1 hash::
 
 Because the response content attribute is a
 :class:`~aiohttp.streams.StreamReader`, you can chain get and post
-requests together (aka HTTP pipelining)::
+requests together::
 
    r = await session.get('http://python.org')
    await session.post('http://httpbin.org/post',
@@ -378,7 +378,7 @@ between multiple requests::
     async with aiohttp.ClientSession() as session:
         await session.get(
             'http://httpbin.org/cookies/set?my_cookie=my_value')
-        filtered = session.cookies_jar.filter_cookies('http://httpbin.org')
+        filtered = session.cookie_jar.filter_cookies('http://httpbin.org')
         assert filtered['my_cookie'].value == 'my_value'
         async with session.get('http://httpbin.org/cookies') as r:
             json_body = await r.json()
@@ -687,7 +687,7 @@ reading procedures::
 
     import async_timeout
 
-    with async_timeout.timeout(0.001):
+    with async_timeout.timeout(0.001, loop=session.loop):
         async with session.get('https://github.com') as r:
             await r.text()
 

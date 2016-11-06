@@ -19,7 +19,7 @@ accepts a :class:`Request` instance as its only parameter and returns a
    from aiohttp import web
 
    async def hello(request):
-       return web.Response(body=b"Hello, world")
+       return web.Response(text="Hello, world")
 
 Next, create an :class:`Application` instance and register the
 request handler with the application's :class:`router <UrlDispatcher>` on a
@@ -56,7 +56,7 @@ Command Line Interface (CLI)
 accepts a list of any non-parsed command-line arguments and returns an
 :class:`Application` instance after setting it up::
 
-    def init_function(argv):
+    def init_func(argv):
         app = web.Application()
         app.router.add_get("/", index_handler)
         return app
@@ -172,8 +172,9 @@ Routes can also be given a *name*::
 Which can then be used to access and build a *URL* for that resource later (e.g.
 in a :ref:`request handler <aiohttp-web-handler>`)::
 
-   >>> request.app.router.named_resources()['root'].url(query={"a": "b", "c": "d"})
-   '/root?a=b&c=d'
+   >>> request.app.router.named_resources()['root'].url_for()
+   ...                                      .with_query({"a": "b", "c": "d"})
+   URL('/root?a=b&c=d')
 
 A more interesting example is building *URLs* for :ref:`variable
 resources <aiohttp-web-variable-handler>`::
@@ -183,9 +184,8 @@ resources <aiohttp-web-variable-handler>`::
 
 In this case you can also pass in the *parts* of the route::
 
-   >>> request.app.router['user-info'].url(
-   ...     parts={'user': 'john_doe'},
-   ...     query="?a=b")
+   >>> request.app.router['user-info'].url_for(user='john_doe')\
+   ...                                         .with_query("a=b")
    '/john_doe/info?a=b'
 
 
@@ -196,7 +196,7 @@ As discussed above, :ref:`handlers <aiohttp-web-handler>` can be first-class
 functions or coroutines::
 
    async def hello(request):
-       return web.Response(body=b"Hello, world")
+       return web.Response(text="Hello, world")
 
    app.router.add_get('/', hello)
 
@@ -212,7 +212,7 @@ application developers can organize handlers in classes if they so wish::
            pass
 
        def handle_intro(self, request):
-           return web.Response(body=b"Hello, world")
+           return web.Response(text="Hello, world")
 
        async def handle_greeting(self, request):
            name = request.match_info.get('name', "Anonymous")
@@ -322,6 +322,7 @@ The following example shows custom routing based on the *HTTP Accept* header::
    chooser.reg_acceptor('application/json', handle_json)
    chooser.reg_acceptor('application/xml', handle_xml)
 
+.. _aiohttp-web-static-file-handling:
 
 Static file handling
 --------------------
@@ -347,6 +348,11 @@ instead could be enabled with ``show_index`` parameter set to ``True``::
 
    app.router.add_static('/prefix', path_to_static_folder, show_index=True)
 
+When a symlink from the static directory is accessed, the server responses to
+client with ``HTTP/404 Not Found`` by default. To allow the server to follow
+symlinks, parameter ``follow_symlinks`` should be set to ``True``::
+
+   app.router.add_static('/prefix', path_to_static_folder, follow_symlinks=True)
 
 Template Rendering
 ------------------
@@ -414,7 +420,7 @@ third-party library, :mod:`aiohttp_session`, that adds *session* support::
         session = await get_session(request)
         last_visit = session['last_visit'] if 'last_visit' in session else None
         text = 'Last visited: {}'.format(last_visit)
-        return web.Response(body=text.encode('utf-8'))
+        return web.Response(text=text)
 
     def make_app():
         app = web.Application()
@@ -480,6 +486,47 @@ header::
    app = web.Application()
    app.router.add_get('/', hello, expect_handler=check_auth)
 
+.. _aiohttp-web-forms:
+
+HTTP Forms
+----------
+
+HTTP Forms are supported out of the box.
+
+If form's method is ``"GET"`` (``<form method="get">``) use
+:attr:`Request.rel_url.query` for getting form data.
+
+For accessing to form data with ``"POST"`` method use
+:meth:`Request.post` or :meth:`Request.multipart`.
+
+:meth:`Request.post` accepts both
+``'application/x-www-form-urlencoded'`` and ``'multipart/form-data'``
+form's data encoding (e.g. ``<form enctype="multipart/form-data">``)
+but :meth:`Request.multipart` is especially effective for uploading
+large files (:ref:`aiohttp-web-file-upload`).
+
+Values submitted by the following form:
+
+.. code-block:: html
+
+   <form action="/login" method="post" accept-charset="utf-8"
+         enctype="application/x-www-form-urlencoded">
+
+       <label for="login">Login</label>
+       <input id="login" name="login" type="text" value="" autofocus/>
+       <label for="password">Password</label>
+       <input id="password" name="password" type="password" value=""/>
+
+       <input type="submit" value="login"/>
+   </form>
+
+could be accessed as::
+
+    async def do_login(request):
+        data = await request.post()
+        login = data['login']
+        password = data['password']
+
 
 .. _aiohttp-web-file-upload:
 
@@ -499,9 +546,9 @@ accepts an MP3 file:
          enctype="multipart/form-data">
 
        <label for="mp3">Mp3</label>
-       <input id="mp3" name="mp3" type="file" value="" />
+       <input id="mp3" name="mp3" type="file" value=""/>
 
-       <input type="submit" value="submit" />
+       <input type="submit" value="submit"/>
    </form>
 
 Then, in the :ref:`request handler <aiohttp-web-handler>` you can access the
@@ -554,7 +601,7 @@ should use :meth:`Request.multipart` which returns :ref:`multipart reader
                 size += len(chunk)
                 f.write(chunk)
 
-        return web.Response(body='{} sized of {} successfully stored'
+        return web.Response(text='{} sized of {} successfully stored'
                                  ''.format(filename, size))
 
 .. _aiohttp-web-websockets:
@@ -890,6 +937,62 @@ parameters.
    signals, but simply reusing existing ones, you will not be affected.
 
 
+Nested applications
+-------------------
+
+Sub applications are designed for solving the problem of the big
+monolithic code base.
+Let's assume we have a project with own business logic and tools like
+administration panel and debug toolbar.
+
+Administration panel is a separate application by its own nature but all
+toolbar URLs are served by prefix like ``/admin``.
+
+Thus we'll create a totally separate application named ``admin`` and
+connect it to main app with prefix by
+:meth:`~aiohttp.web.UrlDispatcher.add_subapp`::
+
+   admin = web.Application()
+   # setup admin routes, signals and middlewares
+
+   app.add_subapp('/admin/', admin)
+
+Middlewares and signals from ``app`` and ``admin`` are chained.
+
+It means that if URL is ``'/admin/something'`` middlewares from
+``app`` are applied first and ``admin.middlewares`` are the next in
+the call chain.
+
+The same is going for
+:attr:`~aiohttp.web.Application.on_response_prepare` signal -- the
+signal is delivered to both top level ``app`` and ``admin`` if
+processing URL is routed to ``admin`` sub-application.
+
+Common signals like :attr:`~aiohttp.web.Application.on_startup`,
+:attr:`~aiohttp.web.Application.on_shutdown` and
+:attr:`~aiohttp.web.Application.on_cleanup` are delivered to all
+registered sub-applications. The passed parameter is sub-application
+instance, not top-level application.
+
+
+Third level sub-applications can be nested into second level ones --
+there are no limitation for nesting level.
+
+Url reversing for sub-applications should generate urls with proper prefix.
+
+But for getting URL sub-application's router should be used::
+
+   admin = web.Application()
+   admin.add_get('/resource', handler, name='name')
+
+   app.add_subapp('/admin/', admin)
+
+   url = admin.router['name'].url_for()
+
+The generated ``url`` from example will have a value
+``URL('/admin/resource')``.
+
+
 .. _aiohttp-web-flow-control:
 
 Flow control
@@ -926,10 +1029,10 @@ Web server response may have one of the following states:
    Data is buffered until there is a sufficient amount to send out.
    Avoid using this mode for sending HTTP data until you have no doubts.
 
-By default streaming data (:class:`StreamResponse`) and websockets
-(:class:`WebSocketResponse`) use **NODELAY** mode, regular responses
-(:class:`Response` and http exceptions derived from it) as well as
-static file handlers work in **CORK** mode.
+By default streaming data (:class:`StreamResponse`), regular responses
+(:class:`Response` and http exceptions derived from it) and websockets
+(:class:`WebSocketResponse`) use **NODELAY** mode, static file
+handlers work in **CORK** mode.
 
 To manual mode switch :meth:`~StreamResponse.set_tcp_cork` and
 :meth:`~StreamResponse.set_tcp_nodelay` methods can be used.  It may
@@ -978,7 +1081,8 @@ Signal handler may look like::
 
     async def on_shutdown(app):
         for ws in app['websockets']:
-            await ws.close(code=999, message='Server shutdown')
+            await ws.close(code=WSCloseCode.GOING_AWAY,
+                           message='Server shutdown')
 
     app.on_shutdown.append(on_shutdown)
 
@@ -1079,6 +1183,20 @@ The task :func:`listen_to_redis` will run forever.
 To shut it down correctly :attr:`Application.on_cleanup` signal handler
 may be used to send a cancellation to it.
 
+
+Handling error pages
+--------------------
+
+Pages like *404 Not Found* and *500 Internal Error* could be handled
+by custom middleware, see :ref:`aiohttp-tutorial-middlewares` for
+details.
+
+Swagger support
+---------------
+
+`aiohttp-swagger <https://github.com/cr0hn/aiohttp-swagger>`_ is a
+library that allow to add Swagger documentation and embed the
+Swagger-UI into your :mod:`aiohttp.web` project.
 
 CORS support
 ------------

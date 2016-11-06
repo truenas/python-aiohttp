@@ -52,9 +52,10 @@ docs/client.rst
 docs/client_reference.rst
 docs/conf.py
 docs/contributing.rst
+docs/deployment.rst
+docs/essays.rst
 docs/faq.rst
 docs/glossary.rst
-docs/gunicorn.rst
 docs/index.rst
 docs/logging.rst
 docs/make.bat
@@ -67,6 +68,7 @@ docs/testing.rst
 docs/tutorial.rst
 docs/web.rst
 docs/web_reference.rst
+docs/whats_new_1_1.rst
 docs/_static/aiohttp-icon-128x128.png
 docs/_static/aiohttp-icon-32x32.png
 docs/_static/aiohttp-icon-64x64.png
@@ -142,7 +144,6 @@ tests/test_web_sendfile_functional.py
 tests/test_web_urldispatcher.py
 tests/test_web_websocket.py
 tests/test_web_websocket_functional.py
-tests/test_web_websocket_functional_oldstyle.py
 tests/test_websocket_handshake.py
 tests/test_websocket_parser.py
 tests/test_websocket_writer.py
