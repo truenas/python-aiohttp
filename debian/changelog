@@ -1,8 +1,12 @@
-python-aiohttp (1.1.1-1) UNRELEASED; urgency=medium
+python-aiohttp (1.1.1-1) unstable; urgency=medium
 
   * New upstream release
+    - works with new multidict (closes: 835299)
+    - decompresses HTTP bodies (closes: 833254)
+  * tests disabled for now (see comment in debian/rules)
+    closes: 830567, 839478
 
- -- Piotr Ożarowski <piotr@debian.org>  Sun, 06 Nov 2016 15:13:03 +0100
+ -- Piotr Ożarowski <piotr@debian.org>  Tue, 08 Nov 2016 22:46:23 +0100
 
 python-aiohttp (0.22.4-1) unstable; urgency=medium
 
