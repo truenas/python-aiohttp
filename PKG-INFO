@@ -1,6 +1,6 @@
 Metadata-Version: 1.1
 Name: aiohttp
-Version: 1.1.2
+Version: 1.1.5
 Summary: http client/server for asyncio
 Home-page: https://github.com/KeepSafe/aiohttp/
 Author: Andrew Svetlov
@@ -160,6 +160,26 @@ Description: http client/server for asyncio
         
         CHANGES
         =======
+        
+        1.1.5 (2016-11-16)
+        ------------------
+        
+        - Fix static file serving in fallback mode #1401
+        
+        1.1.4 (2016-11-14)
+        ------------------
+        
+        - Make `TestServer.make_url` compatible with `yarl.URL` #1389
+        
+        - Generate informative exception on redirects from server which
+          doesn't provide redirection headers #1396
+        
+        
+        1.1.3 (2016-11-10)
+        ------------------
+        
+        - Support *root* resources for sub-applications #1379
+        
         
         1.1.2 (2016-11-08)
         ------------------
