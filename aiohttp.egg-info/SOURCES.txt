@@ -65,6 +65,7 @@ docs/server.rst
 docs/spelling_wordlist.txt
 docs/streams.rst
 docs/testing.rst
+docs/third_party.rst
 docs/tutorial.rst
 docs/web.rst
 docs/web_reference.rst
