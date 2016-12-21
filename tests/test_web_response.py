@@ -905,6 +905,14 @@ def test_drain_before_start():
         yield from resp.drain()
 
 
+@asyncio.coroutine
+def test_changing_status_after_prepare_raises():
+    resp = StreamResponse()
+    yield from resp.prepare(make_request('GET', '/'))
+    with pytest.raises(RuntimeError):
+        resp.set_status(400)
+
+
 def test_nonstr_text_in_ctor():
     with pytest.raises(TypeError):
         Response(text=b'data')
@@ -946,6 +954,11 @@ def test_text_with_empty_payload():
     resp = Response(status=200)
     assert resp.body is None
     assert resp.text is None
+
+
+def test_response_with_content_length_header_without_body():
+    resp = Response(headers={'Content-Length': 123})
+    assert resp.content_length == 123
 
 
 class TestJSONResponse:

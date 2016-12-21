@@ -4,13 +4,14 @@ import cgi
 import collections
 import datetime
 import enum
-import http.cookies
 import io
 import json
 import math
+import re
 import time
 import warnings
 from email.utils import parsedate
+from http.cookies import SimpleCookie
 from types import MappingProxyType
 
 from multidict import CIMultiDict, CIMultiDictProxy, MultiDict, MultiDictProxy
@@ -22,7 +23,7 @@ from .protocol import WebResponse as ResponseImpl
 from .protocol import HttpVersion10, HttpVersion11
 
 __all__ = (
-    'ContentCoding', 'Request', 'StreamResponse', 'Response',
+    'ContentCoding', 'BaseRequest', 'Request', 'StreamResponse', 'Response',
     'json_response'
 )
 
@@ -44,13 +45,13 @@ class ContentCoding(enum.Enum):
 ############################################################
 
 
-class Request(collections.MutableMapping, HeadersMixin):
+class BaseRequest(collections.MutableMapping, HeadersMixin):
 
     POST_METHODS = {hdrs.METH_PATCH, hdrs.METH_POST, hdrs.METH_PUT,
                     hdrs.METH_TRACE, hdrs.METH_DELETE}
 
     def __init__(self, message, payload, transport, reader, writer,
-                 time_service, *,
+                 time_service, task, *,
                  secure_proxy_ssl_header=None):
         self._message = message
         self._transport = transport
@@ -58,10 +59,6 @@ class Request(collections.MutableMapping, HeadersMixin):
         self._writer = writer
         self._post = None
         self._post_files_cache = None
-
-        # matchdict, route_name, handler
-        # or information about traversal lookup
-        self._match_info = None  # initialized after route resolving
 
         self._payload = payload
 
@@ -72,6 +69,7 @@ class Request(collections.MutableMapping, HeadersMixin):
         self._time_service = time_service
         self._state = {}
         self._cache = {}
+        self._task = task
 
     def clone(self, *, method=sentinel, rel_url=sentinel,
               headers=sentinel):
@@ -99,13 +97,14 @@ class Request(collections.MutableMapping, HeadersMixin):
 
         message = self._message._replace(**dct)
 
-        return Request(
+        return self.__class__(
             message,
             self._payload,
             self._transport,
             self._reader,
             self._writer,
             self._time_service,
+            self._task,
             secure_proxy_ssl_header=self._secure_proxy_ssl_header)
 
     # MutableMapping API
@@ -276,23 +275,10 @@ class Request(collections.MutableMapping, HeadersMixin):
                                          tzinfo=datetime.timezone.utc)
         return None
 
-    @reify
+    @property
     def keep_alive(self):
         """Is keepalive enabled by client?"""
-        if self.version < HttpVersion10:
-            return False
-        else:
-            return not self._message.should_close
-
-    @property
-    def match_info(self):
-        """Result of route resolving."""
-        return self._match_info
-
-    @reify
-    def app(self):
-        """Application instance."""
-        return self._match_info.apps[-1]
+        return not self._message.should_close
 
     @property
     def transport(self):
@@ -306,9 +292,43 @@ class Request(collections.MutableMapping, HeadersMixin):
         A read-only dictionary-like object.
         """
         raw = self.headers.get(hdrs.COOKIE, '')
-        parsed = http.cookies.SimpleCookie(raw)
+        parsed = SimpleCookie(raw)
         return MappingProxyType(
             {key: val.value for key, val in parsed.items()})
+
+    @property
+    def http_range(self, *, _RANGE=hdrs.RANGE):
+        """The content of Range HTTP header.
+
+        Return a slice instance.
+
+        """
+        rng = self.headers.get(_RANGE)
+        start, end = None, None
+        if rng is not None:
+            try:
+                pattern = r'^bytes=(\d*)-(\d*)$'
+                start, end = re.findall(pattern, rng)[0]
+            except IndexError:  # pattern was not found in header
+                raise ValueError("range not in acceptible format")
+
+            end = int(end) if end else None
+            start = int(start) if start else None
+
+            if start is None and end is not None:
+                # end with no start is to return tail of content
+                end = -end
+
+            if start is not None and end is not None:
+                # end is inclusive in range header, exclusive for slice
+                end += 1
+
+                if start >= end:
+                    raise ValueError('start cannot be after end')
+
+            if start is end is None:  # No valid range supplied
+                raise ValueError('No start or end of range specified')
+        return slice(start, end, 1)
 
     @property
     def content(self):
@@ -439,6 +459,39 @@ class Request(collections.MutableMapping, HeadersMixin):
         return "<{} {} {} >".format(self.__class__.__name__,
                                     self.method, ascii_encodable_path)
 
+    @asyncio.coroutine
+    def _prepare_hook(self, response):
+        return
+        yield  # pragma: no cover
+
+
+class Request(BaseRequest):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # matchdict, route_name, handler
+        # or information about traversal lookup
+        self._match_info = None  # initialized after route resolving
+
+    @property
+    def match_info(self):
+        """Result of route resolving."""
+        return self._match_info
+
+    @reify
+    def app(self):
+        """Application instance."""
+        return self._match_info.apps[-1]
+
+    @asyncio.coroutine
+    def _prepare_hook(self, response):
+        match_info = self._match_info
+        if match_info is None:
+            return
+        for app in match_info.apps:
+            yield from app.on_response_prepare.send(self, response)
+
 
 ############################################################
 # HTTP Response classes
@@ -455,22 +508,20 @@ class StreamResponse(HeadersMixin):
         self._compression = False
         self._compression_force = False
         self._headers = CIMultiDict()
-        self._cookies = http.cookies.SimpleCookie()
-        self.set_status(status, reason)
+        self._cookies = SimpleCookie()
 
         self._req = None
         self._resp_impl = None
         self._eof_sent = False
 
-        if headers is not None:
-            self._headers.extend(headers)
-        if hdrs.CONTENT_TYPE not in self._headers:
-            self._headers[hdrs.CONTENT_TYPE] = 'application/octet-stream'
+        self._task = None
 
-    def _copy_cookies(self):
-        for cookie in self._cookies.values():
-            value = cookie.output(header='')[1:]
-            self.headers.add(hdrs.SET_COOKIE, value)
+        if headers is not None:
+            # TODO: optimize CIMultiDict extending
+            self._headers.extend(headers)
+        self._headers.setdefault(hdrs.CONTENT_TYPE, 'application/octet-stream')
+
+        self.set_status(status, reason)
 
     @property
     def prepared(self):
@@ -480,6 +531,10 @@ class StreamResponse(HeadersMixin):
     def started(self):
         warnings.warn('use Response.prepared instead', DeprecationWarning)
         return self.prepared
+
+    @property
+    def task(self):
+        return self._task
 
     @property
     def status(self):
@@ -498,6 +553,9 @@ class StreamResponse(HeadersMixin):
         return self._reason
 
     def set_status(self, status, reason=None):
+        if self.prepared:
+            raise RuntimeError("Cannot change the response status code after "
+                               "the headers have been sent")
         self._status = int(status)
         if reason is None:
             reason = ResponseImpl.calc_reason(status)
@@ -509,6 +567,14 @@ class StreamResponse(HeadersMixin):
 
     def force_close(self):
         self._keep_alive = False
+
+    @property
+    def body_length(self):
+        return self._resp_impl.body_length
+
+    @property
+    def output_length(self):
+        return self._resp.impl.output_length
 
     def enable_chunked_encoding(self, chunk_size=None):
         """Enables automatic chunked transfer encoding."""
@@ -733,12 +799,18 @@ class StreamResponse(HeadersMixin):
         resp_impl = self._start_pre_check(request)
         if resp_impl is not None:
             return resp_impl
-        for app in request.match_info.apps:
-            yield from app.on_response_prepare.send(request, self)
+        yield from request._prepare_hook(self)
 
         return self._start(request)
 
-    def _start(self, request):
+    def _start(self, request,
+               HttpVersion10=HttpVersion10,
+               HttpVersion11=HttpVersion11,
+               CONNECTION=hdrs.CONNECTION,
+               DATE=hdrs.DATE,
+               SERVER=hdrs.SERVER,
+               SET_COOKIE=hdrs.SET_COOKIE,
+               TRANSFER_ENCODING=hdrs.TRANSFER_ENCODING):
         self._req = request
         keep_alive = self._keep_alive
         if keep_alive is None:
@@ -753,9 +825,11 @@ class StreamResponse(HeadersMixin):
             not keep_alive,
             self._reason)
 
-        self._copy_cookies()
-
         headers = self.headers
+        for cookie in self._cookies.values():
+            value = cookie.output(header='')[1:]
+            headers.add(SET_COOKIE, value)
+
         if self._compression:
             self._start_compression(request)
 
@@ -764,27 +838,27 @@ class StreamResponse(HeadersMixin):
                 raise RuntimeError("Using chunked encoding is forbidden "
                                    "for HTTP/{0.major}.{0.minor}".format(
                                        request.version))
-            resp_impl.enable_chunked_encoding()
+            resp_impl.chunked = True
             if self._chunk_size:
                 resp_impl.add_chunking_filter(self._chunk_size)
-            headers[hdrs.TRANSFER_ENCODING] = 'chunked'
+            headers[TRANSFER_ENCODING] = 'chunked'
         else:
             resp_impl.length = self.content_length
 
-        if hdrs.DATE not in headers:
-            headers[hdrs.DATE] = request._time_service.strtime()
-        headers.setdefault(hdrs.SERVER, resp_impl.SERVER_SOFTWARE)
-        if hdrs.CONNECTION not in headers:
+        headers.setdefault(DATE, request._time_service.strtime())
+        headers.setdefault(SERVER, resp_impl.SERVER_SOFTWARE)
+        if CONNECTION not in headers:
             if keep_alive:
                 if version == HttpVersion10:
-                    headers[hdrs.CONNECTION] = 'keep-alive'
+                    headers[CONNECTION] = 'keep-alive'
             else:
                 if version == HttpVersion11:
-                    headers[hdrs.CONNECTION] = 'close'
+                    headers[CONNECTION] = 'close'
 
         resp_impl.headers = headers
 
         self._send_headers(resp_impl)
+        self._task = request._task
         return resp_impl
 
     def _send_headers(self, resp_impl):
@@ -883,6 +957,8 @@ class Response(StreamResponse):
         super().__init__(status=status, reason=reason, headers=headers)
         if text is not None:
             self.text = text
+        elif body is None and hdrs.CONTENT_LENGTH in headers:
+            self._body = None
         else:
             self.body = body
 

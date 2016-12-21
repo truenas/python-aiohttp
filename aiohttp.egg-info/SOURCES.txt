@@ -33,6 +33,7 @@ aiohttp/test_utils.py
 aiohttp/web.py
 aiohttp/web_exceptions.py
 aiohttp/web_reqrep.py
+aiohttp/web_server.py
 aiohttp/web_urldispatcher.py
 aiohttp/web_ws.py
 aiohttp/worker.py
@@ -68,6 +69,7 @@ docs/testing.rst
 docs/third_party.rst
 docs/tutorial.rst
 docs/web.rst
+docs/web_lowlevel.rst
 docs/web_reference.rst
 docs/whats_new_1_1.rst
 docs/_static/aiohttp-icon-128x128.png
@@ -82,6 +84,7 @@ examples/client_json.py
 examples/client_ws.py
 examples/curl.py
 examples/fake_server.py
+examples/lowlevel_srv.py
 examples/server.crt
 examples/server.csr
 examples/server.key
@@ -121,6 +124,7 @@ tests/test_multipart.py
 tests/test_parser_buffer.py
 tests/test_protocol.py
 tests/test_proxy.py
+tests/test_proxy_functional.py
 tests/test_pytest_plugin.py
 tests/test_resolver.py
 tests/test_run_app.py
@@ -142,6 +146,7 @@ tests/test_web_request_handler.py
 tests/test_web_response.py
 tests/test_web_sendfile.py
 tests/test_web_sendfile_functional.py
+tests/test_web_server.py
 tests/test_web_urldispatcher.py
 tests/test_web_websocket.py
 tests/test_web_websocket_functional.py

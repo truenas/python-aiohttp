@@ -1,7 +1,7 @@
 .. _aiohttp-client-reference:
 
-HTTP Client Reference
-=====================
+Client Reference
+================
 
 .. module:: aiohttp
 .. currentmodule:: aiohttp
@@ -1203,6 +1203,8 @@ Response object
    .. attribute:: url
 
       URL of request (:class:`str`).
+
+      .. deprecated:: 1.1
 
    .. attribute:: url_obj
 

@@ -1,7 +1,7 @@
 .. _aiohttp-web:
 
-HTTP Server Usage
-=================
+Server Usage
+============
 
 .. currentmodule:: aiohttp.web
 
@@ -159,6 +159,25 @@ You can also specify a custom regex in the form ``{identifier:regex}``::
 
    resource = app.router.add_resource(r'/{name:\d+}')
 
+.. note::
+
+   Regex should match against *percent encoded* URL
+   (``request.rel_url_raw_path``). E.g. *space character* is encoded
+   as ``%20``.
+
+   According to
+   `RFC 3986 <https://tools.ietf.org/html/rfc3986.html#appendix-A>`_
+   allowed in path symbols are::
+
+      allowed       = unreserved / pct-encoded / sub-delims
+                    / ":" / "@" / "/"
+
+      pct-encoded   = "%" HEXDIG HEXDIG
+
+      unreserved    = ALPHA / DIGIT / "-" / "." / "_" / "~"
+
+      sub-delims    = "!" / "$" / "&" / "'" / "(" / ")"
+                    / "*" / "+" / "," / ";" / "="
 
 .. _aiohttp-web-named-routes:
 
@@ -172,8 +191,7 @@ Routes can also be given a *name*::
 Which can then be used to access and build a *URL* for that resource later (e.g.
 in a :ref:`request handler <aiohttp-web-handler>`)::
 
-   >>> request.app.router.named_resources()['root'].url_for()
-   ...                                      .with_query({"a": "b", "c": "d"})
+   >>> request.app.router['root'].url_for().with_query({"a": "b", "c": "d"})
    URL('/root?a=b&c=d')
 
 A more interesting example is building *URLs* for :ref:`variable
@@ -591,7 +609,7 @@ should use :meth:`Request.multipart` which returns :ref:`multipart reader
 
         filename = mp3.filename
 
-        # You cannot relay on Content-Length if transfer is chunked.
+        # You cannot rely on Content-Length if transfer is chunked.
         size = 0
         with open(os.path.join('/spool/yarrr-media/mp3/', filename), 'wb') as f:
             while True:
@@ -636,10 +654,12 @@ with the peer::
 
 .. _aiohttp-web-websocket-read-same-task:
 
-Reading from the *WebSocket* (``await ws.receive()``) and closing it (``await ws.close()``)
-**must only** be done inside the request handler *task*; however, writing
-(``ws.send_str(...)``) to the *WebSocket* and canceling the handler task
-may be delegated to other tasks. See also :ref:`FAQ section <aiohttp_faq_terminating_websockets>`.
+Reading from the *WebSocket* (``await ws.receive()``) and closing it
+(``await ws.close()``) **must only** be done inside the request
+handler *task*; however, writing (``ws.send_str(...)``) to the
+*WebSocket* and canceling the handler task may be delegated to other
+tasks. See also :ref:`FAQ section
+<aiohttp_faq_terminating_websockets>`.
 
 *aiohttp.web* creates an implicit :class:`asyncio.Task` for handling every
 incoming request.
@@ -936,6 +956,7 @@ parameters.
    object creation is subject to change. As long as you are not creating new
    signals, but simply reusing existing ones, you will not be affected.
 
+.. _aiohttp-web-nested-applications:
 
 Nested applications
 -------------------
@@ -1095,7 +1116,7 @@ Proper finalization procedure has three steps:
   2. Fire :meth:`Application.shutdown` event.
 
   3. Close accepted connections from clients by
-     :meth:`RequestHandlerFactory.finish_connections` call with
+     :meth:`Server.shutdown` call with
      reasonable small delay.
 
   4. Call registered application finalizers by :meth:`Application.cleanup`.
@@ -1116,7 +1137,7 @@ finalizing.  It's pretty close to :func:`run_app` utility function::
        srv.close()
        loop.run_until_complete(srv.wait_closed())
        loop.run_until_complete(app.shutdown())
-       loop.run_until_complete(handler.finish_connections(60.0))
+       loop.run_until_complete(handler.shutdown(60.0))
        loop.run_until_complete(app.cleanup())
    loop.close()
 
