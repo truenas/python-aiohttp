@@ -1,6 +1,8 @@
 python-aiohttp (1.2.0-1) unstable; urgency=medium
 
   * New upstream release
+  * debian/compat changed to 10 (this change also closes: 845178 thanks to
+    dh_autoreconf)
 
  -- Piotr Ożarowski <piotr@debian.org>  Wed, 21 Dec 2016 13:30:27 +0100
 
