@@ -7,6 +7,7 @@ import gc
 import socket
 import sys
 import unittest
+from abc import ABC, abstractmethod
 from unittest import mock
 
 from multidict import CIMultiDict
@@ -19,7 +20,7 @@ from . import ClientSession, hdrs
 from .helpers import sentinel
 from .protocol import HttpVersion, RawRequestMessage
 from .signals import Signal
-from .web import Application, Request, UrlMappingMatchInfo
+from .web import Application, Request, Server, UrlMappingMatchInfo
 
 PY_35 = sys.version_info >= (3, 5)
 
@@ -39,10 +40,8 @@ def unused_port():
         return s.getsockname()[1]
 
 
-class TestServer:
-    def __init__(self, app, *, scheme=sentinel, host='127.0.0.1'):
-        self.app = app
-        self._loop = app.loop
+class BaseTestServer(ABC):
+    def __init__(self, *, scheme=sentinel, host='127.0.0.1'):
         self.port = None
         self.server = None
         self.handler = None
@@ -66,17 +65,30 @@ class TestServer:
         self._root = URL('{}://{}:{}'.format(self.scheme,
                                              self.host,
                                              self.port))
-        yield from self.app.startup()
-        self.handler = self.app.make_handler(**kwargs)
-        self.server = yield from self._loop.create_server(self.handler,
+
+        handler = yield from self._make_factory(**kwargs)
+        self.server = yield from self._loop.create_server(handler,
                                                           self.host,
                                                           self.port,
                                                           ssl=self._ssl)
+
+    @abstractmethod  # pragma: no cover
+    @asyncio.coroutine
+    def _make_factory(self, **kwargs):
+        pass
 
     def make_url(self, path):
         url = URL(path)
         assert not url.is_absolute()
         return self._root.join(url)
+
+    @property
+    def started(self):
+        return self.server is not None
+
+    @property
+    def closed(self):
+        return self._closed
 
     @asyncio.coroutine
     def close(self):
@@ -91,15 +103,18 @@ class TestServer:
         exit when used as a context manager.
 
         """
-        if self.server is not None and not self._closed:
+        if self.started and not self.closed:
             self.server.close()
             yield from self.server.wait_closed()
-            yield from self.app.shutdown()
-            yield from self.handler.finish_connections()
-            yield from self.app.cleanup()
             self._root = None
             self.port = None
+            yield from self._close_hook()
             self._closed = True
+
+    @abstractmethod
+    @asyncio.coroutine
+    def _close_hook(self):
+        pass  # pragma: no cover
 
     def __enter__(self):
         self._loop.run_until_complete(self.start_server())
@@ -117,6 +132,44 @@ class TestServer:
         @asyncio.coroutine
         def __aexit__(self, exc_type, exc_value, traceback):
             yield from self.close()
+
+
+class TestServer(BaseTestServer):
+    def __init__(self, app, *, scheme=sentinel, host='127.0.0.1'):
+        self.app = app
+        self._loop = app.loop
+        super().__init__(scheme=scheme, host=host)
+
+    @asyncio.coroutine
+    def _make_factory(self, **kwargs):
+        yield from self.app.startup()
+        self.handler = self.app.make_handler(**kwargs)
+        return self.handler
+
+    @asyncio.coroutine
+    def _close_hook(self):
+        yield from self.app.shutdown()
+        yield from self.handler.shutdown()
+        yield from self.app.cleanup()
+
+
+class RawTestServer(BaseTestServer):
+    def __init__(self, handler,
+                 *, loop=None, scheme=sentinel, host='127.0.0.1'):
+        if loop is None:
+            loop = asyncio.get_event_loop()
+        self._loop = loop
+        self._handler = handler
+        super().__init__(scheme=scheme, host=host)
+
+    @asyncio.coroutine
+    def _make_factory(self, **kwargs):
+        self.handler = Server(self._handler, loop=self._loop, **kwargs)
+        return self.handler
+
+    @asyncio.coroutine
+    def _close_hook(self):
+        return
 
 
 class TestClient:
@@ -137,7 +190,7 @@ class TestClient:
 
     def __init__(self, app_or_server, *, scheme=sentinel, host=sentinel,
                  cookie_jar=None, **kwargs):
-        if isinstance(app_or_server, TestServer):
+        if isinstance(app_or_server, BaseTestServer):
             if scheme is not sentinel or host is not sentinel:
                 raise ValueError("scheme and host are mutable exclusive "
                                  "with TestServer parameter")
@@ -150,7 +203,7 @@ class TestClient:
         else:
             raise TypeError("app_or_server should be either web.Application "
                             "or TestServer instance")
-        self._loop = self._server.app.loop
+        self._loop = self._server._loop
         if cookie_jar is None:
             cookie_jar = aiohttp.CookieJar(unsafe=True,
                                            loop=self._loop)
@@ -166,10 +219,6 @@ class TestClient:
         yield from self._server.start_server()
 
     @property
-    def app(self):
-        return self._server.app
-
-    @property
     def host(self):
         return self._server.host
 
@@ -178,16 +227,12 @@ class TestClient:
         return self._server.port
 
     @property
-    def handler(self):
-        return self._server.handler
-
-    @property
     def server(self):
-        return self._server.server
+        return self._server
 
     @property
     def session(self):
-        """A raw handler to the aiohttp.ClientSession.
+        """An internal aiohttp.ClientSession.
 
         Unlike the methods on the TestClient, client session requests
         do not automatically include the host in the url queried, and
@@ -201,11 +246,11 @@ class TestClient:
 
     @asyncio.coroutine
     def request(self, method, path, *args, **kwargs):
-        """Routes a request to the http server.
+        """Routes a request to tested http server.
 
         The interface is identical to asyncio.ClientSession.request,
         except the loop kwarg is overridden by the instance used by the
-        application.
+        test server.
 
         """
         resp = yield from self._session.request(
@@ -261,7 +306,7 @@ class TestClient:
     def ws_connect(self, path, *args, **kwargs):
         """Initiate websocket connection.
 
-        The api is identical to aiohttp.ClientSession.ws_connect.
+        The api corresponds to aiohttp.ClientSession.ws_connect.
 
         """
         ws = yield from self._session.ws_connect(
@@ -435,45 +480,6 @@ def make_mocked_request(method, path, headers=None, *,
     Useful in unit tests, when spinning full web server is overkill or
     specific conditions and errors are hard to trigger.
 
-    :param method: str, that represents HTTP method, like; GET, POST.
-    :type method: str
-
-    :param path: str, The URL including *PATH INFO* without the host or scheme
-    :type path: str
-
-    :param headers: mapping containing the headers. Can be anything accepted
-        by the multidict.CIMultiDict constructor.
-    :type headers: dict, multidict.CIMultiDict, list of pairs
-
-    :param version: namedtuple with encoded HTTP version
-    :type version: aiohttp.protocol.HttpVersion
-
-    :param closing: flag indicates that connection should be closed after
-        response.
-    :type closing: bool
-
-    :param app: the aiohttp.web application attached for fake request
-    :type app: aiohttp.web.Application
-
-    :param reader: object for storing and managing incoming data
-    :type reader: aiohttp.parsers.StreamParser
-
-    :param writer: object for managing outcoming data
-    :type wirter: aiohttp.parsers.StreamWriter
-
-    :param transport: asyncio transport instance
-    :type transport: asyncio.transports.Transport
-
-    :param payload: raw payload reader object
-    :type  payload: aiohttp.streams.FlowControlStreamReader
-
-    :param sslcontext: ssl.SSLContext object, for HTTPS connection
-    :type sslcontext: ssl.SSLContext
-
-    :param secure_proxy_ssl_header: A tuple representing a HTTP header/value
-        combination that signifies a request is secure.
-    :type secure_proxy_ssl_header: tuple
-
     """
 
     if version < HttpVersion(1, 1):
@@ -508,9 +514,11 @@ def make_mocked_request(method, path, headers=None, *,
     time_service.time.return_value = 12345
     time_service.strtime.return_value = "Tue, 15 Nov 1994 08:12:31 GMT"
 
+    task = mock.Mock()
+
     req = Request(message, payload,
                   transport, reader, writer,
-                  time_service,
+                  time_service, task,
                   secure_proxy_ssl_header=secure_proxy_ssl_header)
 
     match_info = UrlMappingMatchInfo({}, mock.Mock())

@@ -1,11 +1,11 @@
 # see git-dpm(1) from git-dpm package
-98fe54bd7567469b73bb93caa7ea443afd70e309
-98fe54bd7567469b73bb93caa7ea443afd70e309
-98fe54bd7567469b73bb93caa7ea443afd70e309
-98fe54bd7567469b73bb93caa7ea443afd70e309
-python-aiohttp_1.1.5.orig.tar.gz
-8d89d26cf656196de9cc35307a47654727a79fb0
-510247
+4a74b0a6d3f82f187d7c364e8662f23ceaba395e
+4a74b0a6d3f82f187d7c364e8662f23ceaba395e
+4a74b0a6d3f82f187d7c364e8662f23ceaba395e
+4a74b0a6d3f82f187d7c364e8662f23ceaba395e
+python-aiohttp_1.2.0.orig.tar.gz
+e84ce3866174b472a7647d07b8bed67db6f02716
+519187
 debianTag="debian/%e%v"
 patchedTag="patched/%e%v"
 upstreamTag="upstream/%e%u"

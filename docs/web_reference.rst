@@ -1,7 +1,7 @@
 .. _aiohttp-web-reference:
 
-HTTP Server Reference
-=====================
+Server Reference
+================
 
 .. module:: aiohttp.web
 
@@ -10,27 +10,22 @@ HTTP Server Reference
 .. _aiohttp-web-request:
 
 
-Request
--------
+Request and Base Request
+------------------------
 
 The Request object contains all the information about an incoming HTTP request.
 
-Every :ref:`handler<aiohttp-web-handler>` accepts a request instance as the
-first positional parameter.
+:class:`BaseRequest` is used for :ref:`Low-Level
+Servers<aiohttp-web-lowlevel>` (which have no applications, routers, signals
+and middlewares) and :class:`Request` has an *application* and *match
+info* attributes.
 
-A :class:`Request` is a :obj:`dict`-like object, allowing it to be used for
-:ref:`sharing data<aiohttp-web-data-sharing>` among
-:ref:`aiohttp-web-middlewares` and :ref:`aiohttp-web-signals` handlers.
+A :class:`BaseRequest`/:class:`Request` are :obj:`dict`-like objects,
+allowing them to be used for :ref:`sharing
+data<aiohttp-web-data-sharing>` among :ref:`aiohttp-web-middlewares`
+and :ref:`aiohttp-web-signals` handlers.
 
-Although :class:`Request` is :obj:`dict`-like object, it can't be duplicated
-like one using :meth:`Request.copy`.
-
-.. note::
-
-   You should never create the :class:`Request` instance manually --
-   :mod:`aiohttp.web` does it for you.
-
-.. class:: Request
+.. class:: BaseRequest
 
    .. attribute:: version
 
@@ -190,22 +185,6 @@ like one using :meth:`Request.copy`.
 
       Read-only :class:`bool` property.
 
-   .. attribute:: match_info
-
-      Read-only property with :class:`~aiohttp.abc.AbstractMatchInfo`
-      instance for result of route resolving.
-
-      .. note::
-
-         Exact type of property depends on used router.  If
-         ``app.router`` is :class:`UrlDispatcher` the property contains
-         :class:`UrlMappingMatchInfo` instance.
-
-   .. attribute:: app
-
-      An :class:`Application` instance used to call :ref:`request handler
-      <aiohttp-web-handler>`, Read-only property.
-
    .. attribute:: transport
 
       An :ref:`transport<asyncio-transport>` used to process request,
@@ -267,6 +246,31 @@ like one using :meth:`Request.copy`.
       The value is parsed from the *Content-Length* HTTP header.
 
       Returns :class:`int` or ``None`` if *Content-Length* is absent.
+
+   .. attribute:: http_range
+
+      Read-only property that returns information about *Range* HTTP header.
+
+      Returns a :class:`slice` where ``.start`` is *left inclusive
+      bound*, ``.stop`` is *right exclusive bound* and ``.step`` is
+      ``1``.
+
+      The property might be used in two manners:
+
+      1. Attribute-access style (example assumes that both left and
+         right borders are set, the real logic for case of open bounds
+         is more complex)::
+
+            rng = request.http_rangea
+            with open(filename, 'rb') as f:
+                f.seek(rng.start)
+                return f.read(rng.stop-rng.start)
+
+      2. Slice-style::
+
+            return buffer[request.http_range]
+
+      .. versionadded:: 1.2
 
    .. attribute:: if_modified_since
 
@@ -389,6 +393,41 @@ like one using :meth:`Request.copy`.
           internal machinery.
 
 
+.. class:: Request
+
+   An request used for receiving request's information by *web handler*.
+
+   Every :ref:`handler<aiohttp-web-handler>` accepts a request
+   instance as the first positional parameter.
+
+   The class in derived from :class:`BaseRequest`, shares all parent's
+   attributes and methods but has a couple of additional properties:
+
+   .. attribute:: match_info
+
+      Read-only property with :class:`~aiohttp.abc.AbstractMatchInfo`
+      instance for result of route resolving.
+
+      .. note::
+
+         Exact type of property depends on used router.  If
+         ``app.router`` is :class:`UrlDispatcher` the property contains
+         :class:`UrlMappingMatchInfo` instance.
+
+   .. attribute:: app
+
+      An :class:`Application` instance used to call :ref:`request handler
+      <aiohttp-web-handler>`, Read-only property.
+
+   .. note::
+
+      You should never create the :class:`Request` instance manually
+      -- :mod:`aiohttp.web` does it for you. But
+      :meth:`~BaseRequest.clone` may be used for cloning *modified*
+      request copy with changed *path*, *method* etc.
+
+
+
 .. _aiohttp-web-response:
 
 
@@ -459,6 +498,15 @@ StreamResponse
       Deprecated alias for :attr:`prepared`.
 
       .. deprecated:: 0.18
+
+   .. attribute:: task
+
+      A task that serves HTTP request handling.
+
+      May be useful for graceful shutdown of long-running requests
+      (streaming, long polling or web-socket).
+
+      .. versionadded:: 1.2
 
    .. attribute:: status
 
@@ -809,6 +857,17 @@ WebSocketResponse
    communicate with websocket client by :meth:`send_str`,
    :meth:`receive` and others.
 
+   :param bool autoping: Automatically send
+                         :const:`~aiohttp.WSMsgType.PONG` on
+                         :const:`~aiohttp.WSMsgType.PING`
+                         message from client, and handle
+                         :const:`~aiohttp.WSMsgType.PONG`
+                         responses from client.
+                         Note that server doesn't send
+                         :const:`~aiohttp.WSMsgType.PING`
+                         requests, you need to do this explicitly
+                         using :meth:`ping` method.
+
    .. versionadded:: 0.19
 
       The class supports ``async for`` statement for iterating over
@@ -1102,8 +1161,8 @@ Application is a synonym for web-server.
 
 To get fully working example, you have to make *application*, register
 supported urls in *router* and create a *server socket* with
-:class:`~aiohttp.web.RequestHandlerFactory` as a *protocol
-factory*. *RequestHandlerFactory* could be constructed with
+:class:`~aiohttp.web.Server` as a *protocol
+factory*. *Server* could be constructed with
 :meth:`Application.make_handler`.
 
 *Application* contains a *router* instance and a list of callbacks that
@@ -1261,6 +1320,14 @@ duplicated like one using :meth:`Application.copy`.
     :param int max_field_size: Optional maximum header field size. Default:
       ``8190``.
 
+    :param float lingering_time: maximum time during which the server
+       reads and ignore additional data coming from the client when
+       lingering close is on.  Use ``0`` for disabling lingering on
+       server channel closing.
+
+    :param float lingering_timeout: maximum waiting time for more
+        client data to arrive when lingering close is in effect
+
 
     You should pass result of the method as *protocol_factory* to
     :meth:`~asyncio.AbstractEventLoop.create_server`, e.g.::
@@ -1339,31 +1406,44 @@ duplicated like one using :meth:`Application.copy`.
       router for your application).
 
 
-RequestHandlerFactory
-^^^^^^^^^^^^^^^^^^^^^
+Server
+^^^^^^
 
-   A protocol factory compatible with
-   :meth:`~asyncio.AbstreactEventLoop.create_server`.
+A protocol factory compatible with
+:meth:`~asyncio.AbstreactEventLoop.create_server`.
 
-   .. class:: RequestHandlerFactory
+.. class:: Server
 
-      RequestHandlerFactory is responsible for creating HTTP protocol
-      objects that can handle HTTP connections.
+   The class is responsible for creating HTTP protocol
+   objects that can handle HTTP connections.
 
-      .. attribute:: RequestHandlerFactory.connections
+   .. attribute:: Server.connections
 
-         List of all currently opened connections.
+      List of all currently opened connections.
 
-      .. attribute:: requests_count
+   .. attribute:: requests_count
 
-         Amount of processed requests.
+      Amount of processed requests.
 
-         .. versionadded:: 1.0
+      .. versionadded:: 1.0
 
-      .. coroutinemethod:: RequestHandlerFactory.finish_connections(timeout)
+   .. coroutinemethod:: Server.shutdown(timeout)
 
-         A :ref:`coroutine<coroutine>` that should be called to close all opened
-         connections.
+      A :ref:`coroutine<coroutine>` that should be called to close all opened
+      connections.
+
+   .. coroutinemethod:: Server.finish_connections(timeout)
+
+      .. deprecated:: 1.2
+
+         A deprecated alias for :meth:`shutdown`.
+
+   .. versionchanged:: 1.2
+
+      ``Server`` was called ``RequestHandlerFactory`` before ``aiohttp==1.2``.
+
+      The rename has no deprecation period but it's safe: no user
+      should instantiate the class by hands.
 
 
 Router
@@ -1497,6 +1577,9 @@ Router is any object that implements :class:`AbstractRouter` interface.
       system call even if the platform supports it. This can be accomplished by
       by setting environment variable ``AIOHTTP_NOSENDFILE=1``.
 
+      If a gzip version of the static content exists at file path + ``.gz``, it
+      will be used for the response.
+
       .. warning::
 
          Use :meth:`add_static` for development only. In production,
@@ -1510,6 +1593,9 @@ Router is any object that implements :class:`AbstractRouter` interface.
       .. versionchanged:: 0.19.0
          Disable ``sendfile`` by setting environment variable
          ``AIOHTTP_NOSENDFILE=1``
+
+      .. versionchanged:: 1.2.0
+         Send gzip version if file path + ``.gz`` exists.
 
       :param str prefix: URL path prefix for handled static files
 

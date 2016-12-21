@@ -332,10 +332,6 @@ class BodyPartReader(object):
             chunk = window[len(self._prev_chunk):idx]
             if not chunk:
                 self._at_eof = True
-        if 0 < len(chunk) < len(sub) and not self._content_eof:
-            self._prev_chunk += chunk
-            self._at_eof = False
-            return b''
         result = self._prev_chunk
         self._prev_chunk = chunk
         return result
@@ -398,7 +394,9 @@ class BodyPartReader(object):
         :rtype: str
         """
         data = yield from self.read(decode=True)
-        encoding = encoding or self.get_charset(default='latin1')
+        # see https://www.w3.org/TR/html5/forms.html#multipart/form-data-encoding-algorithm # NOQA
+        # and https://dvcs.w3.org/hg/xhr/raw-file/tip/Overview.html#dom-xmlhttprequest-send # NOQA
+        encoding = encoding or self.get_charset(default='utf-8')
         return data.decode(encoding)
 
     @asyncio.coroutine

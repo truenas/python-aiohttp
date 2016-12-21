@@ -10,6 +10,7 @@ Alexander Bayandin
 Alexander Karpinsky
 Alexander Koshevoy
 Alexander Malev
+Alexander Mohr
 Alexander Shorin
 Alexander Travov
 Alexandru Mihai
@@ -21,6 +22,7 @@ Alex Lisovoy
 Amy Boyle
 Andrei Ursulenko
 Andrej Antonov
+Andrew Leech
 Andrew Svetlov
 Andrii Soldatenko
 Anton Kasyanov
@@ -104,10 +106,13 @@ Mun Gwan-gyeong
 Nicolas Braem
 Nikolay Novik
 Olaf Conradi
+Pahaz Blinov <pahaz.blinov@gmail.com>
 Pankaj Pandey
 Pau Freixes
 Paul Colomiets
+Paulus Schoutsen
 Philipp A.
+Rafael Viotti
 Raúl Cumplido
 "Required Field" <requiredfield256@gmail.com>
 Robert Lu
@@ -117,6 +122,7 @@ Sebastian Hüther
 SeongSoo Cho
 Sergey Ninua
 Sergey Skripnick
+Serhii Kostel
 Simon Kennedy
 Sin-Woo Bang
 Stanislas Plum
