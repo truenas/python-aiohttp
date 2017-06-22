@@ -96,12 +96,20 @@ size limit and over any available data.
       async for data in response.content.iter_chunked(1024):
           print(data)
 
-.. comethod:: StreamReader.iter_any(n)
+.. comethod:: StreamReader.iter_any()
    :async-for:
 
    Iterates over data chunks in order of intaking them into the stream::
 
       async for data in response.content.iter_any():
+          print(data)
+
+.. comethod:: StreamReader.iter_chunks()
+   :async-for:
+
+   Iterates over data chunks as received from the server:: 
+
+      async for data in response.content.iter_chunks():
           print(data)
 
 
@@ -144,7 +152,7 @@ Helpers
 
    :param bytes data: data to push back into the stream.
 
-   .. warning:: The method doesn't wake up waiters.
+   .. warning:: The method does not wake up waiters.
 
       E.g. :meth:`~StreamReader.read()` will not be resumed.
 

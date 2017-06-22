@@ -49,6 +49,26 @@ Other HTTP methods are available as well::
    keep-alives (both are on by default) may speed up total performance.
 
 
+JSON Request
+------------
+
+Any of session's request methods like `request`, `get`, `post` etc accept
+`json` parameter::
+
+  async with aiohttp.ClientSession() as session:
+      async with session.post(json={'test': 'object})
+
+
+By default session uses python's standard `json` module for serialization.
+But it is possible to use different `serializer`. `ClientSession` accepts `json_serialize`
+parameter::
+
+  import ujson
+
+  async with aiohttp.ClientSession(json_serialize=ujson.dumps) as session:
+      async with session.post(json={'test': 'object})
+
+
 Passing Parameters In URLs
 --------------------------
 
@@ -63,7 +83,7 @@ following code::
     params = {'key1': 'value1', 'key2': 'value2'}
     async with session.get('http://httpbin.org/get',
                            params=params) as resp:
-        assert resp.url == 'http://httpbin.org/get?key2=value2&key1=value1'
+        assert str(resp.url) == 'http://httpbin.org/get?key2=value2&key1=value1'
 
 You can see that the URL has been correctly encoded by printing the URL.
 
@@ -77,14 +97,14 @@ that case you can specify multiple values for each key::
     params = [('key', 'value1'), ('key', 'value2')]
     async with session.get('http://httpbin.org/get',
                            params=params) as r:
-        assert r.url == 'http://httpbin.org/get?key=value2&key=value1'
+        assert str(r.url) == 'http://httpbin.org/get?key=value2&key=value1'
 
 You can also pass :class:`str` content as param, but beware -- content
 is not encoded by library. Note that ``+`` is not encoded::
 
     async with session.get('http://httpbin.org/get',
                            params='key=value+1') as r:
-            assert r.url == 'http://httpbin.org/get?key=value+1'
+            assert str(r.url) == 'http://httpbin.org/get?key=value+1'
 
 Response Content
 ----------------
@@ -119,7 +139,6 @@ You can also access the response body as bytes, for non-text requests::
 The ``gzip`` and ``deflate`` transfer-encodings are automatically
 decoded for you.
 
-
 JSON Response Content
 ---------------------
 
@@ -131,6 +150,12 @@ There's also a built-in JSON decoder, in case you're dealing with JSON data::
 In case that JSON decoding fails, :meth:`~ClientResponse.json` will
 raise an exception. It is possible to specify custom encoding and
 decoder functions for the :meth:`~ClientResponse.json` call.
+
+.. note::
+
+    The methods above reads the whole response body into memory. If you are
+    planning on reading lots of data, consider using the streaming response
+    method documented below.
 
 
 Streaming Response Content
@@ -163,26 +188,12 @@ It is not possible to use :meth:`~ClientResponse.read`,
 :meth:`~ClientResponse.json` and :meth:`~ClientResponse.text` after
 explicit reading from :attr:`~ClientResponse.content`.
 
+RequestInfo
+-----------
 
-Releasing Response
-------------------
-
-Don't forget to release response after use. This will ensure explicit
-behavior and proper connection pooling.
-
-The easiest way to release response correctly is ``async with`` statement::
-
-    async with session.get(url) as resp:
-        pass
-
-But explicit :meth:`~ClientResponse.release` call also may be used::
-
-    await resp.release()
-
-However it's not necessary if you use :meth:`~ClientResponse.read`,
-:meth:`~ClientResponse.json` and :meth:`~ClientResponse.text` methods.
-They do release connection internally but better don't rely on that
-behavior.
+`ClientResponse` object contains :attr:`~ClientResponse.request_info` property,
+which contains request fields: `url` and `headers`.
+On `raise_for_status` structure is copied to `ClientResponseError` instance.
 
 
 Custom Headers
@@ -297,25 +308,24 @@ send large files without reading them into memory.
 As a simple case, simply provide a file-like object for your body::
 
     with open('massive-body', 'rb') as f:
-       await session.post('http://some.url/streamed', data=f)
+       await session.post('http://httpbin.org/post', data=f)
 
 
-Or you can provide an :ref:`coroutine<coroutine>` that yields bytes objects::
+Or you can use `aiohttp.streamer` object::
 
-   @asyncio.coroutine
-   def my_coroutine():
-      chunk = yield from read_some_data_from_somewhere()
-      if not chunk:
-         return
-      yield chunk
+  @aiohttp.streamer
+  def file_sender(writer, file_name=None):
+      with open(file_name, 'rb') as f:
+          chunk = f.read(2**16)
+          while chunk:
+              yield from writer.write(chunk)
+              chunk = f.read(2**16)
 
-.. warning:: ``yield`` expression is forbidden inside ``async def``.
+  # Then you can use `file_sender` as a data provider:
 
-.. note::
-
-   It is not a standard :ref:`coroutine<coroutine>` as it yields values so it
-   cannot be used like ``yield from my_coroutine()``.
-   :mod:`aiohttp` internally handles such coroutines.
+  async with session.post('http://httpbin.org/post',
+                          data=file_sender(file_name='huge_file')) as resp:
+      print(await resp.text())
 
 Also it is possible to use a :class:`~aiohttp.streams.StreamReader`
 object. Lets say we want to upload a file from another request and
@@ -353,17 +363,15 @@ Uploading pre-compressed data
 -----------------------------
 
 To upload data that is already compressed before passing it to aiohttp, call
-the request function with ``compress=False`` and set the used compression
-algorithm name (usually deflate or zlib) as the value of the
-``Content-Encoding`` header::
+the request function with the used compression algorithm name (usually deflate or zlib)
+as the value of the ``Content-Encoding`` header::
 
     async def my_coroutine(session, headers, my_data):
         data = zlib.compress(my_data)
         headers = {'Content-Encoding': 'deflate'}
         async with session.post('http://httpbin.org/post',
                                 data=data,
-                                headers=headers,
-                                compress=False):
+                                headers=headers)
             pass
 
 
@@ -424,6 +432,10 @@ To tweak or change *transport* layer of requests you can pass a custom
     conn = aiohttp.TCPConnector()
     session = aiohttp.ClientSession(connector=conn)
 
+.. note::
+
+   You can not re-use custom *connector*, *session* object takes ownership
+   of the *connector*.
 
 .. seealso:: :ref:`aiohttp-client-reference-connectors` section for
              more information about different connector types and
@@ -433,20 +445,28 @@ To tweak or change *transport* layer of requests you can pass a custom
 Limiting connection pool size
 -----------------------------
 
-To limit amount of simultaneously opened connection to the same
-endpoint (``(host, port, is_ssl)`` triple) you can pass *limit*
+To limit amount of simultaneously opened connections you can pass *limit*
 parameter to *connector*::
 
     conn = aiohttp.TCPConnector(limit=30)
 
-The example limits amount of parallel connections to `30`.
+The example limits total amount of parallel connections to `30`.
 
-The default is `20`.
+The default is `100`.
 
-If you explicitly want not to have limits to the same endpoint,
-pass `None`. For example::
+If you explicitly want not to have limits, pass `0`. For example::
 
-    conn = aiohttp.TCPConnector(limit=None)
+    conn = aiohttp.TCPConnector(limit=0)
+
+To limit amount of simultaneously opened connection to the same
+endpoint (``(host, port, is_ssl)`` triple) you can pass *limit_per_host*
+parameter to *connector*::
+
+    conn = aiohttp.TCPConnector(limit_per_host=30)
+
+The example limits amount of parallel connections to the same to `30`.
+
+The default is `0` (no limit on per host bases).
 
 
 Resolving using custom nameservers
@@ -484,6 +504,17 @@ pass it into the connector::
   conn = aiohttp.TCPConnector(ssl_context=sslcontext)
   session = aiohttp.ClientSession(connector=conn)
   r = await session.get('https://example.com')
+
+If you need to verify **client-side** certificates, you can do the same thing as the previous example,
+but add another call to ``load_cret_chain`` with the key pair::
+
+  sslcontext = ssl.create_default_context(
+     cafile='/path/to/client-side-ca-bundle.crt')
+  sslcontext.load_cert_chain('/path/to/client/public/key.pem', '/path/to/client/private/key.pem')
+  conn = aiohttp.TCPConnector(ssl_context=sslcontext)
+  session = aiohttp.ClientSession(connector=conn)
+  r = await session.get('https://server-with-client-side-certificates-validaction.com')
+
 
 You may also verify certificates via MD5, SHA1, or SHA256 fingerprint::
 
@@ -535,7 +566,17 @@ aiohttp supports proxy. You have to use
                               proxy="http://some.proxy.com") as resp:
            print(resp.status)
 
-it also supports proxy authorization::
+Contrary to the ``requests`` library, it won't read environment variables by
+default. But you can do so by setting :attr:`proxy_from_env` to True.
+It will use the ``getproxies()`` method from ``urllib`` and thus read the
+value of the ``$url-scheme_proxy`` variable::
+
+   async with aiohttp.ClientSession() as session:
+       async with session.get("http://python.org",
+                              proxy_from_env=True) as resp:
+           print(resp.status)
+
+It also supports proxy authorization::
 
    async with aiohttp.ClientSession() as session:
        proxy_auth = aiohttp.BasicAuth('user', 'pass')
@@ -601,6 +642,7 @@ perspective they are may be retrieved by using
      (b'CONTENT-LENGTH', b'12150'),
      (b'CONNECTION', b'keep-alive'))
 
+
 Response Cookies
 ----------------
 
@@ -636,6 +678,7 @@ history will be an empty sequence.
 
 .. _aiohttp-client-websockets:
 
+
 WebSockets
 ----------
 
@@ -656,7 +699,7 @@ methods::
                    await ws.close()
                    break
                else:
-                   ws.send_str(msg.data + '/answer')
+                   await ws.send_str(msg.data + '/answer')
            elif msg.type == aiohttp.WSMsgType.CLOSED:
                break
            elif msg.type == aiohttp.WSMsgType.ERROR:
@@ -676,7 +719,7 @@ By default all IO operations have 5min timeout. The timeout may be
 overridden by passing ``timeout`` parameter into
 :meth:`ClientSession.get` and family::
 
-    aync with session.get('https://github.com', timeout=60) as r:
+    async with session.get('https://github.com', timeout=60) as r:
         ...
 
 ``None`` or ``0`` disables timeout check.
@@ -690,6 +733,12 @@ reading procedures::
     with async_timeout.timeout(0.001, loop=session.loop):
         async with session.get('https://github.com') as r:
             await r.text()
+
+
+.. note::
+
+   Timeout is cumulative time, it includes all operations like sending request,
+   redirects, response parsing, consuming response, etc.
 
 
 .. disqus::

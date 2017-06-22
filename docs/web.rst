@@ -98,6 +98,26 @@ allowing a handler to serve incoming requests on a *path* having **any**
 The *HTTP method* can be queried later in the request handler using the
 :attr:`Request.method` property.
 
+By default endpoints added with :meth:`~UrlDispatcher.add_get` will accept
+``HEAD`` requests and return the same response headers as they would
+for a ``GET`` request. You can also deny ``HEAD`` requests on a route::
+
+   app.router.add_get('/', handler, allow_head=False)
+
+Here ``handler`` won't be called and the server will response with ``405``.
+
+.. note::
+
+   This is a change as of **aiohttp v2.0** to act in accordance with
+   `RFC 7231 <https://tools.ietf.org/html/rfc7231#section-4.3.2>`_.
+
+   Previous version always returned ``405`` for ``HEAD`` requests
+   to routes added with :meth:`~UrlDispatcher.add_get`.
+
+If you have handlers which perform lots of processing to write the response
+body you may wish to improve performance by skipping that processing
+in the case of ``HEAD`` requests while still taking care to respond with
+the same headers as with ``GET`` requests.
 
 .. _aiohttp-web-resource-and-route:
 
@@ -129,6 +149,17 @@ family are plain shortcuts for :meth:`UrlDispatcher.add_route`.
 .. versionadded:: 0.21.0
 
    Introduce resources.
+
+
+.. _aiohttp-web-custom-resource:
+
+Custom resource implementation
+------------------------------
+
+To register custom resource use :meth:`UrlDispatcher.register_resource`.
+Resource instance must implement `AbstractResource` interface.
+
+.. versionadded:: 1.2.1
 
 
 .. _aiohttp-web-variable-handler:
@@ -383,7 +414,7 @@ supported by the *aiohttp* authors.
 Using it is rather simple. First, setup a *jinja2 environment* with a call
 to :func:`aiohttp_jinja2.setup`::
 
-    app = web.Application(loop=self.loop)
+    app = web.Application()
     aiohttp_jinja2.setup(app,
         loader=jinja2.FileSystemLoader('/path/to/templates/folder'))
 
@@ -512,16 +543,18 @@ HTTP Forms
 HTTP Forms are supported out of the box.
 
 If form's method is ``"GET"`` (``<form method="get">``) use
-:attr:`Request.rel_url.query` for getting form data.
+:attr:`Request.query` for getting form data.
 
-For accessing to form data with ``"POST"`` method use
+To access form data with ``"POST"`` method use
 :meth:`Request.post` or :meth:`Request.multipart`.
 
 :meth:`Request.post` accepts both
 ``'application/x-www-form-urlencoded'`` and ``'multipart/form-data'``
-form's data encoding (e.g. ``<form enctype="multipart/form-data">``)
-but :meth:`Request.multipart` is especially effective for uploading
-large files (:ref:`aiohttp-web-file-upload`).
+form's data encoding (e.g. ``<form enctype="multipart/form-data">``).
+It stores files data in temporary directory. If `client_max_size` is
+specified `post` raises `ValueError` exception.
+For efficiency use :meth:`Request.multipart`, It is especially effective
+for uploading large files (:ref:`aiohttp-web-file-upload`).
 
 Values submitted by the following form:
 
@@ -643,7 +676,7 @@ with the peer::
                 if msg.data == 'close':
                     await ws.close()
                 else:
-                    ws.send_str(msg.data + '/answer')
+                    await ws.send_str(msg.data + '/answer')
             elif msg.type == aiohttp.WSMsgType.ERROR:
                 print('ws connection closed with exception %s' %
                       ws.exception())
@@ -654,11 +687,10 @@ with the peer::
 
 .. _aiohttp-web-websocket-read-same-task:
 
-Reading from the *WebSocket* (``await ws.receive()``) and closing it
-(``await ws.close()``) **must only** be done inside the request
-handler *task*; however, writing (``ws.send_str(...)``) to the
-*WebSocket* and canceling the handler task may be delegated to other
-tasks. See also :ref:`FAQ section
+Reading from the *WebSocket* (``await ws.receive()``) **must only** be done
+inside the request handler *task*; however, writing (``ws.send_str(...)``) to the
+*WebSocket*, closing (``await ws.close()``) and canceling the handler
+task may be delegated to other tasks. See also :ref:`FAQ section
 <aiohttp_faq_terminating_websockets>`.
 
 *aiohttp.web* creates an implicit :class:`asyncio.Task` for handling every
@@ -678,7 +710,6 @@ incoming request.
 
    Parallel reads from websocket are forbidden, there is no
    possibility to call :meth:`aiohttp.web.WebSocketResponse.receive`
-   or :meth:`aiohttp.web.WebSocketResponse.close`
    from two tasks.
 
    See :ref:`FAQ section <aiohttp_faq_parallel_event_sources>` for
@@ -756,6 +787,8 @@ HTTP Exception hierarchy chart::
            * 416 - HTTPRequestRangeNotSatisfiable
            * 417 - HTTPExpectationFailed
            * 421 - HTTPMisdirectedRequest
+           * 422 - HTTPUnprocessableEntity
+           * 424 - HTTPFailedDependency
            * 426 - HTTPUpgradeRequired
            * 428 - HTTPPreconditionRequired
            * 429 - HTTPTooManyRequests
@@ -769,6 +802,7 @@ HTTP Exception hierarchy chart::
            * 504 - HTTPGatewayTimeout
            * 505 - HTTPVersionNotSupported
            * 506 - HTTPVariantAlsoNegotiates
+           * 507 - HTTPInsufficientStorage
            * 510 - HTTPNotExtended
            * 511 - HTTPNetworkAuthenticationRequired
 
@@ -971,12 +1005,12 @@ toolbar URLs are served by prefix like ``/admin``.
 
 Thus we'll create a totally separate application named ``admin`` and
 connect it to main app with prefix by
-:meth:`~aiohttp.web.UrlDispatcher.add_subapp`::
+:meth:`~aiohttp.web.Application.add_subapp`::
 
    admin = web.Application()
    # setup admin routes, signals and middlewares
 
-   app.router.add_subapp('/admin/', admin)
+   app.add_subapp('/admin/', admin)
 
 Middlewares and signals from ``app`` and ``admin`` are chained.
 
@@ -1006,13 +1040,25 @@ But for getting URL sub-application's router should be used::
    admin = web.Application()
    admin.router.add_get('/resource', handler, name='name')
 
-   app.router.add_subapp('/admin/', admin)
+   app.add_subapp('/admin/', admin)
 
    url = admin.router['name'].url_for()
 
 The generated ``url`` from example will have a value
 ``URL('/admin/resource')``.
 
+If main application should do URL reversing for sub-application it could
+use the following explicit technique::
+
+   admin = web.Application()
+   admin.router.add_get('/resource', handler, name='name')
+
+   app.add_subapp('/admin/', admin)
+   app['admin'] = admin
+
+   async def handler(request):  # main application's handler
+       admin = request.app['admin']
+       url = admin.router['name'].url_for()
 
 .. _aiohttp-web-flow-control:
 
@@ -1034,7 +1080,7 @@ Web server response may have one of the following states:
    portion of data since data will be sent using minimum
    frames count.
 
-   If OS doesn't support **CORK** mode (neither ``socket.TCP_CORK``
+   If OS does not support **CORK** mode (neither ``socket.TCP_CORK``
    nor ``socket.TCP_NOPUSH`` exists) the mode is equal to *Nagle's
    enabled* one. The most widespread OS without **CORK** support is
    *Windows*.
@@ -1155,10 +1201,10 @@ handler. Such as listening to message queue or other network message/event
 sources (e.g. ZeroMQ, Redis Pub/Sub, AMQP, etc.) to react to received messages
 within the application.
 
-For example the background task could listen to ZeroMQ on :data:`zmq.SUB` socket,
-process and forward retrieved messages to clients connected via WebSocket
-that are stored somewhere in the application
-(e.g. in the :obj:`application['websockets']` list).
+For example the background task could listen to ZeroMQ on
+:data:`zmq.SUB` socket, process and forward retrieved messages to
+clients connected via WebSocket that are stored somewhere in the
+application (e.g. in the :obj:`application['websockets']` list).
 
 To run such short and long running background tasks aiohttp provides an
 ability to register :attr:`Application.on_startup` signal handler(s) that
@@ -1247,13 +1293,37 @@ After that attach the :mod:`aiohttp_debugtoolbar` middleware to your
     import aiohttp_debugtoolbar
     from aiohttp_debugtoolbar import toolbar_middleware_factory
 
-    app = web.Application(loop=loop,
-                          middlewares=[toolbar_middleware_factory])
+    app = web.Application(middlewares=[toolbar_middleware_factory])
     aiohttp_debugtoolbar.setup(app)
 
 The toolbar is ready to use. Enjoy!!!
 
 .. _aiohttp_debugtoolbar: https://github.com/aio-libs/aiohttp_debugtoolbar
+
+
+Dev Tools
+---------
+
+aiohttp-devtools_ provides a couple of tools to simplify development of
+:mod:`aiohttp.web` applications.
+
+
+Install via ``pip``:
+
+.. code-block:: shell
+
+    $ pip install aiohttp-devtools
+
+   * ``runserver`` provides a development server with auto-reload,
+  live-reload, static file serving and aiohttp_debugtoolbar_
+  integration.
+   * ``start`` is a `cookiecutter command which does the donkey work
+  of creating new :mod:`aiohttp.web` Applications.
+
+Documentation and a complete tutorial of creating and running an app
+locally are available at aiohttp-devtools_.
+
+.. _aiohttp-devtools: https://github.com/aio-libs/aiohttp-devtools
 
 
 .. disqus::

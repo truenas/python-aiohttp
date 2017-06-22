@@ -7,9 +7,10 @@ from unittest import mock
 
 import multidict
 import pytest
+from yarl import URL
 
-from aiohttp import errors, protocol
-from aiohttp._ws_impl import WS_KEY, do_handshake
+from aiohttp import http, http_exceptions
+from aiohttp.http import WS_KEY, do_handshake
 
 
 @pytest.fixture()
@@ -20,8 +21,9 @@ def transport():
 @pytest.fixture()
 def message():
     headers = multidict.MultiDict()
-    return protocol.RawRequestMessage(
-        'GET', '/path', (1, 0), headers, [], True, None)
+    return http.RawRequestMessage(
+        'GET', '/path', (1, 0), headers, [],
+        True, None, True, False, URL('/path'))
 
 
 def gen_ws_headers(protocols=''):
@@ -36,33 +38,33 @@ def gen_ws_headers(protocols=''):
 
 
 def test_not_get(message, transport):
-    with pytest.raises(errors.HttpProcessingError):
+    with pytest.raises(http_exceptions.HttpProcessingError):
         do_handshake('POST', message.headers, transport)
 
 
 def test_no_upgrade(message, transport):
-    with pytest.raises(errors.HttpBadRequest):
+    with pytest.raises(http_exceptions.HttpBadRequest):
         do_handshake(message.method, message.headers, transport)
 
 
 def test_no_connection(message, transport):
     message.headers.extend([('Upgrade', 'websocket'),
                             ('Connection', 'keep-alive')])
-    with pytest.raises(errors.HttpBadRequest):
+    with pytest.raises(http_exceptions.HttpBadRequest):
         do_handshake(message.method, message.headers, transport)
 
 
 def test_protocol_version(message, transport):
     message.headers.extend([('Upgrade', 'websocket'),
                             ('Connection', 'upgrade')])
-    with pytest.raises(errors.HttpBadRequest):
+    with pytest.raises(http_exceptions.HttpBadRequest):
         do_handshake(message.method, message.headers, transport)
 
     message.headers.extend([('Upgrade', 'websocket'),
                             ('Connection', 'upgrade'),
                             ('Sec-Websocket-Version', '1')])
 
-    with pytest.raises(errors.HttpBadRequest):
+    with pytest.raises(http_exceptions.HttpBadRequest):
         do_handshake(message.method, message.headers, transport)
 
 
@@ -70,14 +72,14 @@ def test_protocol_key(message, transport):
     message.headers.extend([('Upgrade', 'websocket'),
                             ('Connection', 'upgrade'),
                             ('Sec-Websocket-Version', '13')])
-    with pytest.raises(errors.HttpBadRequest):
+    with pytest.raises(http_exceptions.HttpBadRequest):
         do_handshake(message.method, message.headers, transport)
 
     message.headers.extend([('Upgrade', 'websocket'),
                             ('Connection', 'upgrade'),
                             ('Sec-Websocket-Version', '13'),
                             ('Sec-Websocket-Key', '123')])
-    with pytest.raises(errors.HttpBadRequest):
+    with pytest.raises(http_exceptions.HttpBadRequest):
         do_handshake(message.method, message.headers, transport)
 
     sec_key = base64.b64encode(os.urandom(2))
@@ -85,7 +87,7 @@ def test_protocol_key(message, transport):
                             ('Connection', 'upgrade'),
                             ('Sec-Websocket-Version', '13'),
                             ('Sec-Websocket-Key', sec_key.decode())])
-    with pytest.raises(errors.HttpBadRequest):
+    with pytest.raises(http_exceptions.HttpBadRequest):
         do_handshake(message.method, message.headers, transport)
 
 

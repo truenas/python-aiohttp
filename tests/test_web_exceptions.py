@@ -5,7 +5,7 @@ from unittest import mock
 
 import pytest
 
-from aiohttp import signals, web
+from aiohttp import helpers, signals, web
 from aiohttp.test_utils import make_mocked_request
 
 
@@ -21,13 +21,25 @@ def request(buf):
     writer = mock.Mock()
     writer.drain.return_value = ()
 
-    def append(data):
+    def append(data=b''):
         buf.extend(data)
+        return helpers.noop()
+
+    def write_headers(status_line, headers):
+        headers = status_line + ''.join(
+            [k + ': ' + v + '\r\n' for k, v in headers.items()])
+        headers = headers.encode('utf-8') + b'\r\n'
+        buf.extend(headers)
+
+    writer.buffer_data.side_effect = append
     writer.write.side_effect = append
+    writer.write_eof.side_effect = append
+    writer.write_headers.side_effect = write_headers
+
     app = mock.Mock()
     app._debug = False
     app.on_response_prepare = signals.Signal(app)
-    req = make_mocked_request(method, path, app=app, writer=writer)
+    req = make_mocked_request(method, path, app=app, payload_writer=writer)
     return req
 
 
@@ -85,8 +97,8 @@ def test_HTTPFound(buf, request):
     txt = buf.decode('utf8')
     assert re.match('HTTP/1.1 302 Found\r\n'
                     'Content-Type: text/plain; charset=utf-8\r\n'
-                    'Content-Length: 10\r\n'
                     'Location: /redirect\r\n'
+                    'Content-Length: 10\r\n'
                     'Date: .+\r\n'
                     'Server: .+\r\n\r\n'
                     '302: Found', txt)
@@ -111,8 +123,8 @@ def test_HTTPMethodNotAllowed(buf, request):
     txt = buf.decode('utf8')
     assert re.match('HTTP/1.1 405 Method Not Allowed\r\n'
                     'Content-Type: text/plain; charset=utf-8\r\n'
-                    'Content-Length: 23\r\n'
                     'Allow: POST,PUT\r\n'
+                    'Content-Length: 23\r\n'
                     'Date: .+\r\n'
                     'Server: .+\r\n\r\n'
                     '405: Method Not Allowed', txt)
