@@ -17,7 +17,12 @@ except ImportError:
 
 ext = '.pyx' if USE_CYTHON else '.c'
 
-extensions = [Extension('aiohttp._websocket', ['aiohttp/_websocket' + ext])]
+extensions = [Extension('aiohttp._websocket', ['aiohttp/_websocket' + ext]),
+              Extension('aiohttp._http_parser',
+                        ['aiohttp/_http_parser' + ext,
+                         'vendor/http-parser/http_parser.c'],),
+              Extension('aiohttp._frozenlist',
+                        ['aiohttp/_frozenlist' + ext])]
 
 
 if USE_CYTHON:
@@ -55,7 +60,7 @@ with codecs.open(os.path.join(os.path.abspath(os.path.dirname(
 
 
 install_requires = ['chardet', 'multidict>=2.1.4',
-                    'async_timeout>=1.1.0', 'yarl>=0.8.1']
+                    'async_timeout>=1.2.0', 'yarl>=0.10.0,<0.11']
 
 if sys.version_info < (3, 4, 2):
     raise RuntimeError("aiohttp requires Python 3.4.2+")
@@ -81,7 +86,7 @@ tests_require = install_requires + ['pytest', 'gunicorn', 'pytest-timeout']
 args = dict(
     name='aiohttp',
     version=version,
-    description='http client/server for asyncio',
+    description='Async http client/server framework (asyncio)',
     long_description='\n\n'.join((read('README.rst'), read('CHANGES.rst'))),
     classifiers=[
         'License :: OSI Approved :: Apache Software License',
@@ -90,16 +95,20 @@ args = dict(
         'Programming Language :: Python :: 3',
         'Programming Language :: Python :: 3.4',
         'Programming Language :: Python :: 3.5',
+        'Programming Language :: Python :: 3.6',
         'Development Status :: 5 - Production/Stable',
         'Operating System :: POSIX',
         'Operating System :: MacOS :: MacOS X',
         'Operating System :: Microsoft :: Windows',
-        'Topic :: Internet :: WWW/HTTP'],
+        'Topic :: Internet :: WWW/HTTP',
+        'Framework :: AsyncIO',
+    ],
     author='Nikolay Kim',
     author_email='fafhrd91@gmail.com',
-    maintainer='Andrew Svetlov',
-    maintainer_email='andrew.svetlov@gmail.com',
-    url='https://github.com/KeepSafe/aiohttp/',
+    maintainer=', '.join(('Nikolay Kim <fafhrd91@gmail.com>',
+                          'Andrew Svetlov <andrew.svetlov@gmail.com>')),
+    maintainer_email='aio-libs@googlegroups.com',
+    url='https://github.com/aio-libs/aiohttp/',
     license='Apache 2',
     packages=['aiohttp'],
     install_requires=install_requires,

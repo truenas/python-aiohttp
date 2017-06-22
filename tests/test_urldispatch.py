@@ -12,8 +12,8 @@ import aiohttp
 from aiohttp import hdrs, web
 from aiohttp.test_utils import make_mocked_request
 from aiohttp.web import HTTPMethodNotAllowed, HTTPNotFound, Response
-from aiohttp.web_urldispatcher import (AbstractResource, ResourceRoute,
-                                       SystemRoute, UrlDispatcher, View,
+from aiohttp.web_urldispatcher import (PATH_SEP, AbstractResource,
+                                       ResourceRoute, SystemRoute, View,
                                        _defaultExpectHandler)
 
 
@@ -32,7 +32,9 @@ def make_handler():
 
 @pytest.fixture
 def app(loop):
-    return web.Application(loop=loop)
+    app = web.Application()
+    app._set_loop(loop)
+    return app
 
 
 @pytest.fixture
@@ -323,8 +325,8 @@ def test_route_plain(router):
     handler = make_handler()
     route = router.add_route('GET', '/get', handler, name='name')
     route2 = next(iter(router['name']))
-    url = route2.url()
-    assert '/get' == url
+    url = route2.url_for()
+    assert '/get' == str(url)
     assert route is route2
 
 
@@ -339,8 +341,20 @@ def test_route_dynamic(router):
                              name='name')
 
     route2 = next(iter(router['name']))
-    url = route2.url(parts={'name': 'John'})
+    with pytest.warns(DeprecationWarning):
+        url = route2.url(parts={'name': 'John'})
     assert '/get/John' == url
+    assert route is route2
+
+
+def test_route_dynamic2(router):
+    handler = make_handler()
+    route = router.add_route('GET', '/get/{name}', handler,
+                             name='name')
+
+    route2 = next(iter(router['name']))
+    url = route2.url_for(name='John')
+    assert '/get/John' == str(url)
     assert route is route2
 
 
@@ -348,7 +362,8 @@ def test_route_with_qs(router):
     handler = make_handler()
     router.add_route('GET', '/get', handler, name='name')
 
-    url = router['name'].url(query=[('a', 'b'), ('c', '1')])
+    with pytest.warns(DeprecationWarning):
+        url = router['name'].url(query=[('a', 'b'), ('c', '1')])
     assert '/get?a=b&c=1' == url
 
 
@@ -493,8 +508,11 @@ def test_add_route_with_invalid_re(router):
     with pytest.raises(ValueError) as ctx:
         router.add_route('GET', r'/handler/{to:+++}', handler)
     s = str(ctx.value)
-    assert s.startswith(
-        "Bad pattern '\/handler\/(?P<to>+++)': nothing to repeat")
+    assert s.startswith("Bad pattern '" +
+                        PATH_SEP +
+                        "handler" +
+                        PATH_SEP +
+                        "(?P<to>+++)': nothing to repeat")
     assert ctx.value.__cause__ is None
 
 
@@ -503,8 +521,8 @@ def test_route_dynamic_with_regex_spec(router):
     route = router.add_route('GET', '/get/{num:^\d+}', handler,
                              name='name')
 
-    url = route.url(parts={'num': '123'})
-    assert '/get/123' == url
+    url = route.url_for(num='123')
+    assert '/get/123' == str(url)
 
 
 def test_route_dynamic_with_regex_spec_and_trailing_slash(router):
@@ -512,16 +530,16 @@ def test_route_dynamic_with_regex_spec_and_trailing_slash(router):
     route = router.add_route('GET', '/get/{num:^\d+}/', handler,
                              name='name')
 
-    url = route.url(parts={'num': '123'})
-    assert '/get/123/' == url
+    url = route.url_for(num='123')
+    assert '/get/123/' == str(url)
 
 
 def test_route_dynamic_with_regex(router):
     handler = make_handler()
     route = router.add_route('GET', r'/{one}/{two:.+}', handler)
 
-    url = route.url(parts={'one': 1, 'two': 2})
-    assert '/1/2' == url
+    url = route.url_for(one=1, two=2)
+    assert '/1/2' == str(url)
 
 
 @asyncio.coroutine
@@ -534,6 +552,16 @@ def test_regular_match_info(router):
     assert {'name': 'john'} == match_info
     assert re.match("<MatchInfo {'name': 'john'}: .+<Dynamic.+>>",
                     repr(match_info))
+
+
+@asyncio.coroutine
+def test_match_info_with_plus(router):
+    handler = make_handler()
+    router.add_route('GET', '/get/{version}', handler)
+
+    req = make_request('GET', '/get/1.0+test')
+    match_info = yield from router.resolve(req)
+    assert {'version': '1.0+test'} == match_info
 
 
 @asyncio.coroutine
@@ -786,7 +814,7 @@ def test_match_info_get_info_dynamic(router):
     req = make_request('GET', '/value')
     info = yield from router.resolve(req)
     assert info.get_info() == {
-        'pattern': re.compile('\\/(?P<a>[^{}/]+)'),
+        'pattern': re.compile(PATH_SEP+'(?P<a>[^{}/]+)'),
         'formatter': '/{a}'}
 
 
@@ -797,7 +825,10 @@ def test_match_info_get_info_dynamic2(router):
     req = make_request('GET', '/path/to')
     info = yield from router.resolve(req)
     assert info.get_info() == {
-        'pattern': re.compile('\\/(?P<a>[^{}/]+)\\/(?P<b>[^{}/]+)'),
+        'pattern': re.compile(PATH_SEP +
+                              '(?P<a>[^{}/]+)' +
+                              PATH_SEP +
+                              '(?P<b>[^{}/]+)'),
         'formatter': '/{a}/{b}'}
 
 
@@ -907,46 +938,46 @@ def test_url_for_in_resource_route(router):
     assert URL('/get/John') == route.url_for(name='John')
 
 
-def test_subapp_get_info(router, loop):
-    subapp = web.Application(loop=loop)
-    resource = router.add_subapp('/pre', subapp)
+def test_subapp_get_info(app, loop):
+    subapp = web.Application()
+    resource = subapp.add_subapp('/pre', subapp)
     assert resource.get_info() == {'prefix': '/pre', 'app': subapp}
 
 
-def test_subapp_url(router, loop):
-    subapp = web.Application(loop=loop)
-    resource = router.add_subapp('/pre', subapp)
+def test_subapp_url(app, loop):
+    subapp = web.Application()
+    resource = app.add_subapp('/pre', subapp)
     with pytest.raises(RuntimeError):
         resource.url()
 
 
-def test_subapp_url_for(router, loop):
-    subapp = web.Application(loop=loop)
-    resource = router.add_subapp('/pre', subapp)
+def test_subapp_url_for(app, loop):
+    subapp = web.Application()
+    resource = app.add_subapp('/pre', subapp)
     with pytest.raises(RuntimeError):
         resource.url_for()
 
 
-def test_subapp_repr(router, loop):
-    subapp = web.Application(loop=loop)
-    resource = router.add_subapp('/pre', subapp)
+def test_subapp_repr(app, loop):
+    subapp = web.Application()
+    resource = app.add_subapp('/pre', subapp)
     assert repr(resource).startswith(
         '<PrefixedSubAppResource /pre -> <Application')
 
 
-def test_subapp_len(router, loop):
-    subapp = web.Application(loop=loop)
-    subapp.router.add_get('/', make_handler())
+def test_subapp_len(app, loop):
+    subapp = web.Application()
+    subapp.router.add_get('/', make_handler(), allow_head=False)
     subapp.router.add_post('/', make_handler())
-    resource = router.add_subapp('/pre', subapp)
+    resource = app.add_subapp('/pre', subapp)
     assert len(resource) == 2
 
 
-def test_subapp_iter(router, loop):
-    subapp = web.Application(loop=loop)
-    r1 = subapp.router.add_get('/', make_handler())
+def test_subapp_iter(app, loop):
+    subapp = web.Application()
+    r1 = subapp.router.add_get('/', make_handler(), allow_head=False)
     r2 = subapp.router.add_post('/', make_handler())
-    resource = router.add_subapp('/pre', subapp)
+    resource = app.add_subapp('/pre', subapp)
     assert list(resource) == [r1, r2]
 
 
@@ -961,11 +992,18 @@ def test_frozen_router(router):
         router.add_get('/', make_handler())
 
 
-def test_frozen_router_subapp(loop, router):
-    subapp = web.Application(loop=loop)
+def test_frozen_router_subapp(app, loop):
+    subapp = web.Application()
     subapp.freeze()
     with pytest.raises(RuntimeError):
-        router.add_subapp('/', subapp)
+        app.add_subapp('/', subapp)
+
+
+def test_frozen_app_on_subapp(app, loop):
+    app.freeze()
+    subapp = web.Application()
+    with pytest.raises(RuntimeError):
+        app.add_subapp('/', subapp)
 
 
 def test_set_options_route(router):
@@ -991,16 +1029,16 @@ def test_dynamic_url_with_name_started_from_undescore(router):
     assert URL('/get/John') == route.url_for(_name='John')
 
 
-def test_cannot_add_subapp_with_empty_prefix(router, loop):
-    subapp = web.Application(loop=loop)
+def test_cannot_add_subapp_with_empty_prefix(app, loop):
+    subapp = web.Application()
     with pytest.raises(ValueError):
-        router.add_subapp('', subapp)
+        app.add_subapp('', subapp)
 
 
-def test_cannot_add_subapp_with_slash_prefix(router, loop):
-    subapp = web.Application(loop=loop)
+def test_cannot_add_subapp_with_slash_prefix(app, loop):
+    subapp = web.Application()
     with pytest.raises(ValueError):
-        router.add_subapp('/', subapp)
+        app.add_subapp('/', subapp)
 
 
 @asyncio.coroutine
@@ -1011,9 +1049,3 @@ def test_convert_empty_path_to_slash_on_freezing(router):
     assert resource.get_info() == {'path': ''}
     router.freeze()
     assert resource.get_info() == {'path': '/'}
-
-
-def test_add_to_non_initialized_router():
-    router = UrlDispatcher()
-    with pytest.raises(RuntimeError):
-        router.add_get('/', make_handler())

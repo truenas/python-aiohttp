@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 import aiohttp
@@ -13,9 +15,13 @@ async def test_async_with_session(loop):
 
 async def test_close_resp_on_error_async_with_session(loop, test_server):
     async def handler(request):
-        return web.Response()
+        resp = web.StreamResponse(headers={'content-length': '100'})
+        await resp.prepare(request)
+        await resp.drain()
+        await asyncio.sleep(0.1, loop=request.app.loop)
+        return resp
 
-    app = web.Application(loop=loop)
+    app = web.Application()
     app.router.add_get('/', handler)
     server = await test_server(app)
 
@@ -32,7 +38,7 @@ async def test_release_resp_on_normal_exit_from_cm(loop, test_server):
     async def handler(request):
         return web.Response()
 
-    app = web.Application(loop=loop)
+    app = web.Application()
     app.router.add_get('/', handler)
     server = await test_server(app)
 
@@ -45,14 +51,18 @@ async def test_release_resp_on_normal_exit_from_cm(loop, test_server):
 
 async def test_non_close_detached_session_on_error_cm(loop, test_server):
     async def handler(request):
-        return web.Response()
+        resp = web.StreamResponse(headers={'content-length': '100'})
+        await resp.prepare(request)
+        await resp.drain()
+        await asyncio.sleep(0.1, loop=request.app.loop)
+        return resp
 
-    app = web.Application(loop=loop)
+    app = web.Application()
     app.router.add_get('/', handler)
     server = await test_server(app)
 
-    cm = aiohttp.get(server.make_url('/'), loop=loop)
-    session = cm._session
+    session = aiohttp.ClientSession(loop=loop)
+    cm = session.get(server.make_url('/'))
     assert not session.closed
     with pytest.raises(RuntimeError):
         async with cm as resp:
@@ -62,9 +72,30 @@ async def test_non_close_detached_session_on_error_cm(loop, test_server):
 
 
 async def test_close_detached_session_on_non_existing_addr(loop):
-    cm = aiohttp.get('http://non-existing.example.com', loop=loop)
-    session = cm._session
-    assert not session.closed
-    with pytest.raises(Exception):
-        await cm
+    session = aiohttp.ClientSession(loop=loop)
+
+    async with session:
+        cm = session.get('http://non-existing.example.com')
+        assert not session.closed
+        with pytest.raises(Exception):
+            await cm
+
     assert session.closed
+
+
+async def test_aiohttp_request(loop, test_server):
+    async def handler(request):
+        return web.Response()
+
+    app = web.Application()
+    app.router.add_get('/', handler)
+    server = await test_server(app)
+
+    async with aiohttp.request('GET', server.make_url('/'), loop=loop) as resp:
+        await resp.read()
+        assert resp.status == 200
+
+    resp = await aiohttp.request('GET', server.make_url('/'), loop=loop)
+    await resp.read()
+    assert resp.status == 200
+    assert resp.connection is None

@@ -66,8 +66,10 @@ and :ref:`aiohttp-web-signals` handlers.
 
       A string representing the scheme of the request.
 
-      The scheme is ``'https'`` if transport for request handling is
-      *SSL* or ``secure_proxy_ssl_header`` is matching.
+      The scheme is ``'https'`` if transport for request handling is *SSL*, if
+      ``secure_proxy_ssl_header`` is matching (deprecated), if the ``proto``
+      portion of a ``Forward`` header is present and contains ``https``, or if
+      an ``X-Forwarded-Proto`` header is present and contains ``https``.
 
       ``'http'`` otherwise.
 
@@ -79,15 +81,50 @@ and :ref:`aiohttp-web-signals` handlers.
 
          Use :attr:`url` (``request.url.scheme``) instead.
 
+   .. attribute:: secure
+
+      Shorthand for ``request.url.scheme == 'https'``
+
+      Read-only :class:`bool` property.
+
+      .. seealso:: :attr:`scheme`
+
+   .. attribute:: forwarded
+
+      A tuple containing all parsed Forwarded header(s).
+
+      Makes an effort to parse Forwarded headers as specified by :rfc:`7239`:
+
+      - It adds one (immutable) dictionary per Forwarded ``field-value``, i.e.
+        per proxy. The element corresponds to the data in the Forwarded
+        ``field-value`` added by the first proxy encountered by the client.
+        Each subsequent item corresponds to those added by later proxies.
+      - It checks that every value has valid syntax in general as specified
+        in :rfc:`7239#section-4`: either a ``token`` or a ``quoted-string``.
+      - It un-escapes ``quoted-pairs``.
+      - It does NOT validate 'by' and 'for' contents as specified in
+        :rfc:`7239#section-6`.
+      - It does NOT validate ``host`` contents (Host ABNF).
+      - It does NOT validate ``proto`` contents for valid URI scheme names.
+
+      Returns a tuple containing one or more ``MappingProxy`` objects
+
+      .. seealso:: :attr:`scheme`
+
+      .. seealso:: :attr:`host`
+
    .. attribute:: host
 
-      *HOST* header of request, Read-only property.
+      Host name of the request.
 
-      Returns :class:`str` or ``None`` if HTTP request has no *HOST* header.
+      Host name is resolved through the following headers, in this order:
 
-      .. deprecated:: 1.1
+      - *Forwarded*
+      - *X-Forwarded-Host*
+      - *Host*
 
-         Use :attr:`url` (``request.url.host``) instead.
+      Returns  :class:`str`, or ``None`` if no host name is found in the
+      headers.
 
    .. attribute:: path_qs
 
@@ -95,10 +132,6 @@ and :ref:`aiohttp-web-signals` handlers.
       ``/app/blog?id=10``
 
       Read-only :class:`str` property.
-
-      .. deprecated:: 1.1
-
-         Use :attr:`url` (``str(request.rel_url)``) instead.
 
    .. attribute:: path
 
@@ -108,64 +141,27 @@ and :ref:`aiohttp-web-signals` handlers.
 
       Read-only :class:`str` property.
 
-      .. deprecated:: 1.1
-
-         Use :attr:`url` (``request.rel_url.path``) instead.
-
    .. attribute:: raw_path
 
       The URL including raw *PATH INFO* without the host or scheme.
-      Warning, the path may be quoted and may contains non valid URL
-      characters, e.g.
+      Warning, the path may be quoted and may contains non valid URL characters, e.g.
       ``/my%2Fpath%7Cwith%21some%25strange%24characters``.
 
       For unquoted version please take a look on :attr:`path`.
 
       Read-only :class:`str` property.
 
-      .. deprecated:: 1.1
+   .. attribute:: query
 
-         Use :attr:`url` (``request.rel_url.raw_path``) instead.
+      A multidict with all the variables in the query string.
+
+      Read-only :class:`~multidict.MultiDictProxy` lazy property.
 
    .. attribute:: query_string
 
       The query string in the URL, e.g., ``id=10``
 
       Read-only :class:`str` property.
-
-      .. deprecated:: 1.1
-
-         Use :attr:`url` (``request.rel_url.query_string``) instead.
-
-   .. attribute:: GET
-
-      A multidict with all the variables in the query string.
-
-      Read-only :class:`~multidict.MultiDictProxy` lazy property.
-
-      .. versionchanged:: 0.17
-         A multidict contains empty items for query string like ``?arg=``.
-
-      .. deprecated:: 1.1
-
-         Use :attr:`url` (``request.rel_url.query``) instead.
-
-   .. attribute:: POST
-
-      A multidict with all the variables in the POST parameters.
-      POST property available only after :meth:`Request.post` coroutine call.
-
-      Read-only :class:`~multidict.MultiDictProxy`.
-
-      :raises RuntimeError: if :meth:`Request.post` was not called \
-                            before accessing the property.
-
-      .. deprecated:: 1.1
-
-         Since POST date preloaded is not implemented yet and probably
-         will never be done the :meth:`post` call is required and
-         recommended way for accessing to POST data. :meth:`multipart`
-         is useful for working with multipart encoded content.
 
    .. attribute:: headers
 
@@ -261,7 +257,7 @@ and :ref:`aiohttp-web-signals` handlers.
          right borders are set, the real logic for case of open bounds
          is more complex)::
 
-            rng = request.http_rangea
+            rng = request.http_range
             with open(filename, 'rb') as f:
                 f.seek(rng.start)
                 return f.read(rng.stop-rng.start)
@@ -434,8 +430,8 @@ and :ref:`aiohttp-web-signals` handlers.
 Response classes
 ----------------
 
-For now, :mod:`aiohttp.web` has two classes for the *HTTP response*:
-:class:`StreamResponse` and :class:`Response`.
+For now, :mod:`aiohttp.web` has three classes for the *HTTP response*:
+:class:`StreamResponse`, :class:`Response` and :class:`FileResponse`.
 
 Usually you need to use the second one. :class:`StreamResponse` is
 intended for streaming data, while :class:`Response` contains *HTTP
@@ -492,12 +488,6 @@ StreamResponse
       been called, ``False`` otherwise.
 
       .. versionadded:: 0.18
-
-   .. attribute:: started
-
-      Deprecated alias for :attr:`prepared`.
-
-      .. deprecated:: 0.18
 
    .. attribute:: task
 
@@ -595,8 +585,8 @@ StreamResponse
          manipulations.
 
    .. method:: set_cookie(name, value, *, path='/', expires=None, \
-                   domain=None, max_age=None, \
-                   secure=None, httponly=None, version=None)
+                          domain=None, max_age=None, \
+                          secure=None, httponly=None, version=None)
 
       Convenient way for setting :attr:`cookies`, allows to specify
       some additional properties like *max_age* in a single call.
@@ -716,22 +706,6 @@ StreamResponse
 
       Clear :attr:`tcp_cork` if *value* is ``True``.
 
-   .. method:: start(request)
-
-      :param aiohttp.web.Request request: HTTP request object, that the
-                                          response answers.
-
-      Send *HTTP header*. You should not change any header data after
-      calling this method.
-
-      .. deprecated:: 0.18
-
-         Use :meth:`prepare` instead.
-
-      .. warning:: The method doesn't call
-         :attr:`~aiohttp.web.Application.on_response_prepare` signal, use
-         :meth:`prepare` instead.
-
    .. coroutinemethod:: prepare(request)
 
       :param aiohttp.web.Request request: HTTP request object, that the
@@ -790,8 +764,7 @@ Response
 ^^^^^^^^
 
 .. class:: Response(*, status=200, headers=None, content_type=None, \
-                    charset=None, \
-                    body=None, text=None)
+                    charset=None, body=None, text=None)
 
    The most usable response class, inherited from :class:`StreamResponse`.
 
@@ -846,8 +819,8 @@ Response
 WebSocketResponse
 ^^^^^^^^^^^^^^^^^
 
-.. class:: WebSocketResponse(*, timeout=10.0, autoclose=True, \
-                             autoping=True, protocols=())
+.. class:: WebSocketResponse(*, timeout=10.0, receive_timeout=None, autoclose=True, \
+                             autoping=True, heartbeat=None, protocols=())
 
    Class for handling server-side websockets, inherited from
    :class:`StreamResponse`.
@@ -857,16 +830,31 @@ WebSocketResponse
    communicate with websocket client by :meth:`send_str`,
    :meth:`receive` and others.
 
+   .. versionadded:: 1.3.0
+
+   To enable back-pressure from slow websocket clients treat methods
+   `ping()`, `pong()`, `send_str()`, `send_bytes()`, `send_json()` as coroutines.
+   By default write buffer size is set to 64k.
+
    :param bool autoping: Automatically send
                          :const:`~aiohttp.WSMsgType.PONG` on
                          :const:`~aiohttp.WSMsgType.PING`
                          message from client, and handle
                          :const:`~aiohttp.WSMsgType.PONG`
                          responses from client.
-                         Note that server doesn't send
+                         Note that server does not send
                          :const:`~aiohttp.WSMsgType.PING`
                          requests, you need to do this explicitly
                          using :meth:`ping` method.
+
+   .. versionadded:: 1.3.0
+
+   :param float heartbeat: Send `ping` message every `heartbeat` seconds
+                           and wait `pong` response, close connection if `pong` response
+                           is not received.
+
+   :param float receive_timeout: Timeout value for `receive` operations.
+                                 Default value is None (no timeout for receive operation)
 
    .. versionadded:: 0.19
 
@@ -892,20 +880,6 @@ WebSocketResponse
 
       .. versionadded:: 0.18
 
-   .. method:: start(request)
-
-      Starts websocket. After the call you can use websocket methods.
-
-      :param aiohttp.web.Request request: HTTP request object, that the
-                                          response answers.
-
-
-      :raises HTTPException: if websocket handshake has failed.
-
-      .. deprecated:: 0.18
-
-         Use :meth:`prepare` instead.
-
    .. method:: can_prepare(request)
 
       Performs checks for *request* data to figure out if websocket
@@ -928,12 +902,6 @@ WebSocketResponse
                client and server subprotocols are not overlapping.
 
       .. note:: The method never raises exception.
-
-   .. method:: can_start(request)
-
-      Deprecated alias for :meth:`can_prepare`
-
-      .. deprecated:: 0.18
 
    .. attribute:: closed
 
@@ -977,7 +945,7 @@ WebSocketResponse
 
       :raise RuntimeError: if connections is not started or closing.
 
-   .. method:: send_str(data)
+   .. coroutinemethod:: send_str(data)
 
       Send *data* to peer as :const:`~aiohttp.WSMsgType.TEXT` message.
 
@@ -987,7 +955,7 @@ WebSocketResponse
 
       :raise TypeError: if data is not :class:`str`
 
-   .. method:: send_bytes(data)
+   .. coroutinemethod:: send_bytes(data)
 
       Send *data* to peer as :const:`~aiohttp.WSMsgType.BINARY` message.
 
@@ -998,7 +966,7 @@ WebSocketResponse
       :raise TypeError: if data is not :class:`bytes`,
                         :class:`bytearray` or :class:`memoryview`.
 
-   .. method:: send_json(data, *, dumps=json.loads)
+   .. coroutinemethod:: send_json(data, *, dumps=json.loads)
 
       Send *data* to peer as JSON string.
 
@@ -1019,11 +987,7 @@ WebSocketResponse
       A :ref:`coroutine<coroutine>` that initiates closing
       handshake by sending :const:`~aiohttp.WSMsgType.CLOSE` message.
 
-      .. note::
-
-         Can only be called by the request handling task. To
-         programmatically close websocket server side see the
-         :ref:`FAQ section <aiohttp_faq_terminating_websockets>`.
+      It is save to call `close()` from different task.
 
       :param int code: closing code
 
@@ -1031,9 +995,9 @@ WebSocketResponse
                       :class:`str` (converted to *UTF-8* encoded bytes)
                       or :class:`bytes`.
 
-      :raise RuntimeError: if connection is not started or closing
+      :raise RuntimeError: if connection is not started
 
-   .. coroutinemethod:: receive()
+   .. coroutinemethod:: receive(timeout=None)
 
       A :ref:`coroutine<coroutine>` that waits upcoming *data*
       message from peer and returns it.
@@ -1050,27 +1014,30 @@ WebSocketResponse
 
          Can only be called by the request handling task.
 
+      :param timeout: timeout for `receive` operation.
+                      timeout value overrides response`s receive_timeout attribute.
+
       :return: :class:`~aiohttp.WSMessage`
 
       :raise RuntimeError: if connection is not started
 
-      :raise: :exc:`~aiohttp.errors.WSClientDisconnectedError` on closing.
-
-   .. coroutinemethod:: receive_str()
+   .. coroutinemethod:: receive_str(*, timeout=None)
 
       A :ref:`coroutine<coroutine>` that calls :meth:`receive` but
-      also asserts the message type is
-      :const:`~aiohttp.WSMsgType.TEXT`.
+      also asserts the message type is :const:`~aiohttp.WSMsgType.TEXT`.
 
       .. note::
 
          Can only be called by the request handling task.
 
+      :param timeout: timeout for `receive` operation.
+                      timeout value overrides response`s receive_timeout attribute.
+
       :return str: peer's message content.
 
       :raise TypeError: if message is :const:`~aiohttp.WSMsgType.BINARY`.
 
-   .. coroutinemethod:: receive_bytes()
+   .. coroutinemethod:: receive_bytes(*, timeout=None)
 
       A :ref:`coroutine<coroutine>` that calls :meth:`receive` but
       also asserts the message type is
@@ -1080,11 +1047,14 @@ WebSocketResponse
 
          Can only be called by the request handling task.
 
+      :param timeout: timeout for `receive` operation.
+                      timeout value overrides response`s receive_timeout attribute.
+
       :return bytes: peer's message content.
 
       :raise TypeError: if message is :const:`~aiohttp.WSMsgType.TEXT`.
 
-   .. coroutinemethod:: receive_json(*, loads=json.loads)
+   .. coroutinemethod:: receive_json(*, loads=json.loads, timeout=None)
 
       A :ref:`coroutine<coroutine>` that calls :meth:`receive_str` and loads the
       JSON string to a Python dict.
@@ -1097,6 +1067,9 @@ WebSocketResponse
                               :class:`str` and returns :class:`dict`
                               with parsed JSON (:func:`json.loads` by
                               default).
+
+   :param timeout: timeout for `receive` operation.
+                      timeout value overrides response`s receive_timeout attribute.
 
       :return dict: loaded JSON content
 
@@ -1173,7 +1146,7 @@ will be called during application finishing.
 properties for later access from a :ref:`handler<aiohttp-web-handler>` via the
 :attr:`Request.app` property::
 
-   app = Application(loop=loop)
+   app = Application()
    app['database'] = await aiopg.create_engine(**db_config)
 
    async def handler(request):
@@ -1183,17 +1156,10 @@ properties for later access from a :ref:`handler<aiohttp-web-handler>` via the
 Although :class:`Application` is a :obj:`dict`-like object, it can't be
 duplicated like one using :meth:`Application.copy`.
 
-.. class:: Application(*, loop=None, router=None, logger=<default>, \
+.. class:: Application(*, router=None, logger=<default>, \
                        middlewares=(), debug=False, **kwargs)
 
    The class inherits :class:`dict`.
-
-   :param loop: :ref:`event loop<asyncio-event-loop>` used
-    for processing HTTP requests.
-
-    If param is ``None`` :func:`asyncio.get_event_loop`
-    used for getting default event loop, but we strongly
-    recommend to use explicit loops everywhere.
 
    :param router: :class:`aiohttp.abc.AbstractRouter` instance, the system
                   creates :class:`UrlDispatcher` by default if
@@ -1207,6 +1173,8 @@ duplicated like one using :meth:`Application.copy`.
                        :ref:`aiohttp-web-middlewares` for details.
 
    :param debug: Switches debug mode.
+
+   :param loop: loop parameter is deprecated. loop is get set during freeze stage.
 
    .. attribute:: router
 
@@ -1286,15 +1254,23 @@ duplicated like one using :meth:`Application.copy`.
 
       .. seealso:: :ref:`aiohttp-web-graceful-shutdown` and :attr:`on_shutdown`.
 
-   .. method:: make_handler(**kwargs)
+   .. method:: make_handler(loop=None, **kwargs)
 
     Creates HTTP protocol factory for handling requests.
 
-    :param tuple secure_proxy_ssl_header: Secure proxy SSL header. Can
-      be used to detect request scheme,
-      e.g. ``secure_proxy_ssl_header=('X-Forwarded-Proto', 'https')``.
+    :param loop: :ref:`event loop<asyncio-event-loop>` used
+                 for processing HTTP requests.
 
-      Default: ``None``.
+                 If param is ``None`` :func:`asyncio.get_event_loop`
+                 used for getting default event loop.
+
+    :param tuple secure_proxy_ssl_header: Default: ``None``.
+
+      .. deprecated:: 2.1
+
+        See ``request.url.scheme`` for built-in resolution of the current
+        scheme using the standard and de-facto standard headers.
+
     :param bool tcp_keepalive: Enable TCP Keep-Alive. Default: ``True``.
     :param int keepalive_timeout: Number of seconds before closing Keep-Alive
       connection. Default: ``75`` seconds (NGINX's default value).
@@ -1328,7 +1304,6 @@ duplicated like one using :meth:`Application.copy`.
     :param float lingering_timeout: maximum waiting time for more
         client data to arrive when lingering close is in effect
 
-
     You should pass result of the method as *protocol_factory* to
     :meth:`~asyncio.AbstractEventLoop.create_server`, e.g.::
 
@@ -1353,7 +1328,7 @@ duplicated like one using :meth:`Application.copy`.
    .. coroutinemethod:: shutdown()
 
       A :ref:`coroutine<coroutine>` that should be called on
-      server stopping but before :meth:`finish()`.
+      server stopping but before :meth:`cleanup()`.
 
       The purpose of the method is calling :attr:`on_shutdown` signal
       handlers.
@@ -1365,29 +1340,6 @@ duplicated like one using :meth:`Application.copy`.
 
       The purpose of the method is calling :attr:`on_cleanup` signal
       handlers.
-
-   .. coroutinemethod:: finish()
-
-      A deprecated alias for :meth:`cleanup`.
-
-      .. deprecated:: 0.21
-
-   .. method:: register_on_finish(self, func, *args, **kwargs):
-
-      Register *func* as a function to be executed at termination.
-      Any optional arguments that are to be passed to *func* must be
-      passed as arguments to :meth:`register_on_finish`.  It is possible to
-      register the same function and arguments more than once.
-
-      During the call of :meth:`finish` all functions registered are called in
-      last in, first out order.
-
-      *func* may be either regular function or :ref:`coroutine<coroutine>`,
-      :meth:`finish` will un-yield (`await`) the later.
-
-      .. deprecated:: 0.21
-
-         Use :attr:`on_cleanup` instead: ``app.on_cleanup.append(handler)``.
 
    .. note::
 
@@ -1412,7 +1364,7 @@ Server
 A protocol factory compatible with
 :meth:`~asyncio.AbstreactEventLoop.create_server`.
 
-.. class:: Server
+      .. class:: Server
 
    The class is responsible for creating HTTP protocol
    objects that can handle HTTP connections.
@@ -1523,14 +1475,26 @@ Router is any object that implements :class:`AbstractRouter` interface.
 
       :returns: new :class:`PlainRoute` or :class:`DynamicRoute` instance.
 
-   .. method:: add_get(path, *args, **kwargs)
+   .. method:: add_get(path, handler, *, name=None, allow_head=True, **kwargs)
 
       Shortcut for adding a GET handler. Calls the :meth:`add_route` with \
       ``method`` equals to ``'GET'``.
 
+      If *allow_head* is ``True`` (default) the route for method HEAD
+      is added with the same handler as for GET.
+
+      If *name* is provided the name for HEAD route is suffixed with
+      ``'-head'``. For example ``router.add_get(path, handler,
+      name='route')`` call adds two routes: first for GET with name
+      ``'route'`` and second for HEAD with name ``'route-head'``.
+
       .. versionadded:: 1.0
 
-   .. method:: add_post(path, *args, **kwargs)
+      .. versionchanged:: 2.0
+
+         *allow_head* parameter added.
+
+   .. method:: add_post(path, handler, **kwargs)
 
       Shortcut for adding a POST handler. Calls the :meth:`add_route` with \
 
@@ -1539,21 +1503,28 @@ Router is any object that implements :class:`AbstractRouter` interface.
 
       .. versionadded:: 1.0
 
-   .. method:: add_put(path, *args, **kwargs)
+   .. method:: add_head(path, handler, **kwargs)
+
+      Shortcut for adding a HEAD handler. Calls the :meth:`add_route` with \
+      ``method`` equals to ``'HEAD'``.
+
+      .. versionadded:: 1.0
+
+   .. method:: add_put(path, handler, **kwargs)
 
       Shortcut for adding a PUT handler. Calls the :meth:`add_route` with \
       ``method`` equals to ``'PUT'``.
 
       .. versionadded:: 1.0
 
-   .. method:: add_patch(path, *args, **kwargs)
+   .. method:: add_patch(path, handler, **kwargs)
 
       Shortcut for adding a PATCH handler. Calls the :meth:`add_route` with \
       ``method`` equals to ``'PATCH'``.
 
       .. versionadded:: 1.0
 
-   .. method:: add_delete(path, *args, **kwargs)
+   .. method:: add_delete(path, handler, **kwargs)
 
       Shortcut for adding a DELETE handler. Calls the :meth:`add_route` with \
       ``method`` equals to ``'DELETE'``.
@@ -1933,7 +1904,7 @@ Resource classes hierarchy::
 .. class:: PrefixedSubAppResource
 
    A resource for serving nested applications. The class instance is
-   returned by :class:`~aiohttp.web.UrlDispatcher.add_subapp` call.
+   returned by :class:`~aiohttp.web.Application.add_subapp` call.
 
    .. versionadded:: 1.1
 
@@ -2113,11 +2084,12 @@ Utilities
    .. seealso:: :ref:`aiohttp-web-file-upload`
 
 
-.. function:: run_app(app, *, host='0.0.0.0', port=None, loop=None, \
-                      shutdown_timeout=60.0, ssl_context=None, \
-                      print=print, backlog=128, \
+.. function:: run_app(app, *, host=None, port=None, path=None, \
+                      sock=None, shutdown_timeout=60.0, \
+                      ssl_context=None, print=print, backlog=128, \
                       access_log_format=None, \
-                      access_log=aiohttp.log.access_logger)
+                      access_log=aiohttp.log.access_logger, \
+                      handle_signals=True, loop=None)
 
    A utility function for running an application, serving it until
    keyboard interrupt and performing a
@@ -2129,13 +2101,32 @@ Utilities
 
    The function uses *app.loop* as event loop to run.
 
+   The server will listen on any host or Unix domain socket path you supply.
+   If no hosts or paths are supplied, or only a port is supplied, a TCP server
+   listening on 0.0.0.0 (all hosts) will be launched.
+
+   Distributing HTTP traffic to multiple hosts or paths on the same
+   application process provides no performance benefit as the requests are
+   handled on the same event loop. See :doc:`deployment` for ways of
+   distributing work for increased performance.
+
    :param app: :class:`Application` instance to run
 
-   :param str host: host for HTTP server, ``'0.0.0.0'`` by default
+   :param str host: TCP/IP host or a sequence of hosts for HTTP server.
+                    Default is ``'0.0.0.0'`` if *port* has been specified
+                    or if *path* is not supplied.
 
-   :param int port: port for HTTP server. By default is ``8080`` for
-                    plain text HTTP and ``8443`` for HTTP via SSL
-                    (when *ssl_context* parameter is specified).
+   :param int port: TCP/IP port for HTTP server. Default is ``8080`` for plain
+                    text HTTP and ``8443`` for HTTP via SSL (when
+                    *ssl_context* parameter is specified).
+
+   :param str path: file system path for HTTP server Unix domain socket.
+                    A sequence of file system paths can be used to bind
+                    multiple domain sockets. Listening on Unix domain
+                    sockets is not supported by all operating systems.
+
+   :param socket sock: a preexisting socket object to accept connections on.
+                       A sequence of socket objects can be passed.
 
    :param int shutdown_timeout: a delay to wait for graceful server
                                 shutdown before disconnecting all
@@ -2165,6 +2156,16 @@ Utilities
                              :ref:`aiohttp-logging-access-log-format-spec`
                              for details.
 
+   :param bool handle_signals: override signal TERM handling to gracefully
+                               exit the application.
+
+   :param loop: an *event loop* used for running the application
+                (``None`` by default).
+
+                If the loop is not explicitly specified the function
+                closes it by :meth:`~asyncio.AbstractEventLoop.close` call but
+                **does nothing** for **non-default** loop.
+
 
 Constants
 ---------
@@ -2181,9 +2182,37 @@ Constants
 
       *GZIP compression*
 
-   .. attribute:: identity
+.. attribute:: identity
 
       *no compression*
+
+
+Middlewares
+-----------
+
+Normalize path middleware
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. function:: normalize_path_middleware(*, append_slash=True, merge_slashes=True)
+
+  Middleware that normalizes the path of a request. By normalizing
+  it means:
+
+      - Add a trailing slash to the path.
+      - Double slashes are replaced by one.
+
+  The middleware returns as soon as it finds a path that resolves
+  correctly. The order if all enabled is 1) merge_slashes, 2) append_slash
+  and 3) both merge_slashes and append_slash. If the path resolves with
+  at least one of those conditions, it will redirect to the new path.
+
+  If append_slash is True append slash when needed. If a resource is
+  defined with trailing slash and the request comes without it, it will
+  append it automatically.
+
+  If merge_slashes is True, merge multiple consecutive slashes in the
+  path into one.
+
 
 .. disqus::
   :title: aiohttp server reference

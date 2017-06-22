@@ -3,8 +3,8 @@
 Helpers API
 ===========
 
-All public names from submodules ``errors``, ``multipart``,
-``parsers``, ``protocol``, ``utils``, and ``wsgi`` are exported into
+All public names from submodules ``client``, ``multipart``,
+``protocol`` and ``utils`` are exported into
 ``aiohttp`` namespace.
 
 WebSocket utilities
@@ -66,7 +66,7 @@ WebSocket utilities
 
        An endpoint (client) is terminating the
        connection because it has expected the server to negotiate one or
-       more extension, but the server didn't return them in the response
+       more extension, but the server did not return them in the response
        message of the WebSocket handshake.  The list of extensions that
        are needed should appear in the /reason/ part of the Close frame.
        Note that this status code is not used by the server, because it
@@ -144,7 +144,7 @@ WebSocket utilities
 
       1. :class:`str` for :attr:`WSMsgType.TEXT` messages.
 
-      2. :class:`bytes` for :attr:`WSMsgType.TEXT` messages.
+      2. :class:`bytes` for :attr:`WSMsgType.BINARY` messages.
 
       3. :class:`WSCloseCode` for :attr:`WSMsgType.CLOSE` messages.
 
@@ -174,14 +174,6 @@ WebSocket utilities
       .. deprecated:: 1.0
 
 
-aiohttp.errors module
----------------------
-
-.. automodule:: aiohttp.errors
-    :members:
-    :undoc-members:
-    :show-inheritance:
-
 aiohttp.helpers module
 ----------------------
 
@@ -199,26 +191,10 @@ aiohttp.multipart module
     :undoc-members:
     :show-inheritance:
 
-aiohttp.parsers module
-----------------------
-
-.. automodule:: aiohttp.parsers
-    :members:
-    :undoc-members:
-    :show-inheritance:
-
 aiohttp.signals module
 ----------------------
 
 .. automodule:: aiohttp.signals
-    :members:
-    :undoc-members:
-    :show-inheritance:
-
-aiohttp.wsgi module
--------------------
-
-.. automodule:: aiohttp.wsgi
     :members:
     :undoc-members:
     :show-inheritance:

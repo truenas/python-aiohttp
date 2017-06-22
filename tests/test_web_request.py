@@ -6,9 +6,10 @@ import pytest
 from multidict import CIMultiDict, MultiDict
 from yarl import URL
 
-from aiohttp.protocol import HttpVersion
+from aiohttp import HttpVersion
 from aiohttp.streams import StreamReader
 from aiohttp.test_utils import make_mocked_request
+from aiohttp.web import HTTPRequestEntityTooLarge
 
 
 @pytest.fixture
@@ -27,48 +28,38 @@ def test_ctor(make_request):
     assert 'a=1&b=2' == req.query_string
     assert CIMultiDict() == req.headers
     assert () == req.raw_headers
+    assert req.message == req._message
 
-    get = req.GET
+    get = req.query
     assert MultiDict([('a', '1'), ('b', '2')]) == get
     # second call should return the same object
-    assert get is req.GET
+    assert get is req.query
 
     assert req.keep_alive
 
     # just make sure that all lines of make_mocked_request covered
     headers = CIMultiDict(FOO='bar')
-    reader = mock.Mock()
-    writer = mock.Mock()
     payload = mock.Mock()
-    transport = mock.Mock()
+    protocol = mock.Mock()
     app = mock.Mock()
     req = make_request('GET', '/path/to?a=1&b=2', headers=headers,
-                       writer=writer, reader=reader, payload=payload,
-                       transport=transport, app=app)
+                       protocol=protocol, payload=payload, app=app)
     assert req.app is app
     assert req.content is payload
-    assert req.transport is transport
-    assert req._reader is reader
-    assert req._writer is writer
+    assert req.protocol is protocol
+    assert req.transport is protocol.transport
     assert req.headers == headers
     assert req.raw_headers == ((b'Foo', b'bar'),)
+    assert req.task is req._task
+
+    with pytest.warns(DeprecationWarning):
+        assert req.GET is req.query
 
 
 def test_doubleslashes(make_request):
     # NB: //foo/bar is an absolute URL with foo netloc and /bar path
     req = make_request('GET', '/bar//foo/')
     assert '/bar//foo/' == req.path
-
-
-def test_POST(make_request):
-    req = make_request('POST', '/')
-    with pytest.raises(RuntimeError):
-        req.POST
-
-    marker = object()
-    req._post = marker
-    assert req.POST is marker
-    assert req.POST is marker
 
 
 def test_content_type_not_specified(make_request):
@@ -101,7 +92,7 @@ def test_calc_content_type_on_getting_charset(make_request):
 def test_urlencoded_querystring(make_request):
     req = make_request('GET',
                        '/yandsearch?text=%D1%82%D0%B5%D0%BA%D1%81%D1%82')
-    assert {'text': 'текст'} == req.GET
+    assert {'text': 'текст'} == req.query
 
 
 def test_non_ascii_path(make_request):
@@ -111,7 +102,7 @@ def test_non_ascii_path(make_request):
 
 def test_non_ascii_raw_path(make_request):
     req = make_request('GET', '/путь')
-    assert '/%D0%BF%D1%83%D1%82%D1%8C' == req.raw_path
+    assert '/путь' == req.raw_path
 
 
 def test_content_length(make_request):
@@ -232,11 +223,13 @@ def test___repr___non_ascii_path(make_request):
 def test_http_scheme(make_request):
     req = make_request('GET', '/')
     assert "http" == req.scheme
+    assert req.secure is False
 
 
 def test_https_scheme_by_ssl_transport(make_request):
     req = make_request('GET', '/', sslcontext=True)
     assert "https" == req.scheme
+    assert req.secure is True
 
 
 def test_https_scheme_by_secure_proxy_ssl_header(make_request):
@@ -244,6 +237,7 @@ def test_https_scheme_by_secure_proxy_ssl_header(make_request):
                        secure_proxy_ssl_header=('X-HEADER', '1'),
                        headers=CIMultiDict({'X-HEADER': '1'}))
     assert "https" == req.scheme
+    assert req.secure is True
 
 
 def test_https_scheme_by_secure_proxy_ssl_header_false_test(make_request):
@@ -251,6 +245,117 @@ def test_https_scheme_by_secure_proxy_ssl_header_false_test(make_request):
                        secure_proxy_ssl_header=('X-HEADER', '1'),
                        headers=CIMultiDict({'X-HEADER': '0'}))
     assert "http" == req.scheme
+    assert req.secure is False
+
+
+def test_single_forwarded_header(make_request):
+    header = 'by=identifier;for=identifier;host=identifier;proto=identifier'
+    req = make_request('GET', '/', headers=CIMultiDict({'Forwarded': header}))
+    assert req.forwarded[0]['by'] == 'identifier'
+    assert req.forwarded[0]['for'] == 'identifier'
+    assert req.forwarded[0]['host'] == 'identifier'
+    assert req.forwarded[0]['proto'] == 'identifier'
+
+
+def test_single_forwarded_header_camelcase(make_request):
+    header = 'bY=identifier;fOr=identifier;HOst=identifier;pRoTO=identifier'
+    req = make_request('GET', '/', headers=CIMultiDict({'Forwarded': header}))
+    assert req.forwarded[0]['by'] == 'identifier'
+    assert req.forwarded[0]['for'] == 'identifier'
+    assert req.forwarded[0]['host'] == 'identifier'
+    assert req.forwarded[0]['proto'] == 'identifier'
+
+
+def test_single_forwarded_header_single_param(make_request):
+    header = 'BY=identifier'
+    req = make_request('GET', '/', headers=CIMultiDict({'Forwarded': header}))
+    assert req.forwarded[0]['by'] == 'identifier'
+
+
+def test_single_forwarded_header_multiple_param(make_request):
+    header = 'By=identifier1,BY=identifier2,  By=identifier3 ,  BY=identifier4'
+    req = make_request('GET', '/', headers=CIMultiDict({'Forwarded': header}))
+    assert len(req.forwarded) == 4
+    assert req.forwarded[0]['by'] == 'identifier1'
+    assert req.forwarded[1]['by'] == 'identifier2'
+    assert req.forwarded[2]['by'] == 'identifier3'
+    assert req.forwarded[3]['by'] == 'identifier4'
+
+
+def test_single_forwarded_header_quoted_escaped(make_request):
+    header = 'BY=identifier;pROTO="\lala lan\d\~ 123\!&"'
+    req = make_request('GET', '/', headers=CIMultiDict({'Forwarded': header}))
+    assert req.forwarded[0]['by'] == 'identifier'
+    assert req.forwarded[0]['proto'] == 'lala land~ 123!&'
+
+
+def test_multiple_forwarded_headers(make_request):
+    headers = CIMultiDict()
+    headers.add('Forwarded', 'By=identifier1;for=identifier2, BY=identifier3')
+    headers.add('Forwarded', 'By=identifier4;fOr=identifier5')
+    req = make_request('GET', '/', headers=headers)
+    assert len(req.forwarded) == 3
+    assert req.forwarded[0]['by'] == 'identifier1'
+    assert req.forwarded[0]['for'] == 'identifier2'
+    assert req.forwarded[1]['by'] == 'identifier3'
+    assert req.forwarded[2]['by'] == 'identifier4'
+    assert req.forwarded[2]['for'] == 'identifier5'
+
+
+def test_https_scheme_by_forwarded_header(make_request):
+    req = make_request('GET', '/',
+                       headers=CIMultiDict(
+                           {'Forwarded': 'by=;for=;host=;proto=https'}))
+    assert "https" == req.scheme
+    assert req.secure is True
+
+
+def test_https_scheme_by_malformed_forwarded_header(make_request):
+    req = make_request('GET', '/',
+                       headers=CIMultiDict({'Forwarded': 'malformed value'}))
+    assert "http" == req.scheme
+    assert req.secure is False
+
+
+def test_https_scheme_by_x_forwarded_proto_header(make_request):
+    req = make_request('GET', '/',
+                       headers=CIMultiDict({'X-Forwarded-Proto': 'https'}))
+    assert "https" == req.scheme
+    assert req.secure is True
+
+
+def test_https_scheme_by_x_forwarded_proto_header_no_tls(make_request):
+    req = make_request('GET', '/',
+                       headers=CIMultiDict({'X-Forwarded-Proto': 'http'}))
+    assert "http" == req.scheme
+    assert req.secure is False
+
+
+def test_host_by_forwarded_header(make_request):
+    headers = CIMultiDict()
+    headers.add('Forwarded', 'By=identifier1;for=identifier2, BY=identifier3')
+    headers.add('Forwarded', 'by=;for=;host=example.com')
+    req = make_request('GET', '/', headers=headers)
+    assert req.host == 'example.com'
+
+
+def test_host_by_forwarded_header_malformed(make_request):
+    req = make_request('GET', '/',
+                       headers=CIMultiDict({'Forwarded': 'malformed value'}))
+    assert req.host is None
+
+
+def test_host_by_x_forwarded_host_header(make_request):
+    req = make_request('GET', '/',
+                       headers=CIMultiDict(
+                           {'X-Forwarded-Host': 'example.com'}))
+    assert req.host == 'example.com'
+
+
+def test_host_by_host_header(make_request):
+    req = make_request('GET', '/',
+                       headers=CIMultiDict({'Host': 'example.com'}))
+    assert req.host == 'example.com'
 
 
 def test_raw_headers(make_request):
@@ -318,3 +423,67 @@ def test_cannot_clone_after_read(loop):
     yield from req.read()
     with pytest.raises(RuntimeError):
         req.clone()
+
+
+@asyncio.coroutine
+def test_make_too_big_request(loop):
+    payload = StreamReader(loop=loop)
+    large_file = 1024 ** 2 * b'x'
+    too_large_file = large_file + b'x'
+    payload.feed_data(too_large_file)
+    payload.feed_eof()
+    req = make_mocked_request('POST', '/', payload=payload)
+    with pytest.raises(HTTPRequestEntityTooLarge) as err:
+        yield from req.read()
+
+    assert err.value.status_code == 413
+
+
+@asyncio.coroutine
+def test_make_too_big_request_adjust_limit(loop):
+    payload = StreamReader(loop=loop)
+    large_file = 1024 ** 2 * b'x'
+    too_large_file = large_file + b'x'
+    payload.feed_data(too_large_file)
+    payload.feed_eof()
+    max_size = 1024**2 + 2
+    req = make_mocked_request('POST', '/', payload=payload,
+                              client_max_size=max_size)
+    txt = yield from req.read()
+    assert len(txt) == 1024**2 + 1
+
+
+@asyncio.coroutine
+def test_multipart_formdata(loop):
+    payload = StreamReader(loop=loop)
+    payload.feed_data(b"""-----------------------------326931944431359\r
+Content-Disposition: form-data; name="a"\r
+\r
+b\r
+-----------------------------326931944431359\r
+Content-Disposition: form-data; name="c"\r
+\r
+d\r
+-----------------------------326931944431359--\r\n""")
+    content_type = "multipart/form-data; boundary="\
+                   "---------------------------326931944431359"
+    payload.feed_eof()
+    req = make_mocked_request('POST', '/',
+                              headers={'CONTENT-TYPE': content_type},
+                              payload=payload)
+    result = yield from req.post()
+    assert dict(result) == {'a': 'b', 'c': 'd'}
+
+
+@asyncio.coroutine
+def test_make_too_big_request_limit_None(loop):
+    payload = StreamReader(loop=loop)
+    large_file = 1024 ** 2 * b'x'
+    too_large_file = large_file + b'x'
+    payload.feed_data(too_large_file)
+    payload.feed_eof()
+    max_size = None
+    req = make_mocked_request('POST', '/', payload=payload,
+                              client_max_size=max_size)
+    txt = yield from req.read()
+    assert len(txt) == 1024**2 + 1

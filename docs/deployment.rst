@@ -24,7 +24,7 @@ Just call :func:`aiohttp.web.run_app` function passing
 
 
 The method is very simple and could be the best solution in some
-trivial cases. But it doesn't utilize all CPU cores.
+trivial cases. But it does not utilize all CPU cores.
 
 For running multiple aiohttp server instances use *reverse proxies*.
 
@@ -50,7 +50,7 @@ Nginx configuration
 --------------------
 
 Here is short extraction about writing Nginx configuration file.
-It doesn't cover all available Nginx options.
+It does not cover all available Nginx options.
 
 For full reference read `Nginx tutorial
 <https://www.nginx.com/resources/admin-guide/>`_ and `official Nginx
@@ -66,7 +66,7 @@ First configure HTTP server itself:
        listen 80;
        client_max_body_size 4G;
 
-       server example.com;
+       server_name example.com;
 
        location / {
          proxy_set_header Host $http_host;
@@ -96,23 +96,29 @@ Next we need to configure *aiohttp upstream group*:
 
    http {
      upstream aiohttp {
-       fail_timeout=0 means we always retry an upstream even if it failed
+       # fail_timeout=0 means we always retry an upstream even if it failed
        # to return a good HTTP response
 
-       # TCP servers
-       server 127.0.0.1:8081 fail_timeout=0;
-       server 127.0.0.1:8082 fail_timeout=0;
-       server 127.0.0.1:8083 fail_timeout=0;
-       server 127.0.0.1:8084 fail_timeout=0;
+       # Unix domain servers
+       server unix:/tmp/example_1.sock fail_timeout=0;
+       server unix:/tmp/example_2.sock fail_timeout=0;
+       server unix:/tmp/example_3.sock fail_timeout=0;
+       server unix:/tmp/example_4.sock fail_timeout=0;
+
+       # Unix domain sockets are used in this example due to their high performance,
+       # but TCP/IP sockets could be used instead:
+       # server 127.0.0.1:8081 fail_timeout=0;
+       # server 127.0.0.1:8082 fail_timeout=0;
+       # server 127.0.0.1:8083 fail_timeout=0;
+       # server 127.0.0.1:8084 fail_timeout=0;
      }
    }
 
 All HTTP requests for ``http://example.com`` except ones for
-``http://example.com/static`` will be redirected to
-``127.0.0.1:8081``, ``127.0.0.1:8082``, ``127.0.0.1:8083`` or
-``127.0.0.1:8084`` *backend proxies*.
-
-By default Nginx uses round-robin algorithm for backend selection.
+``http://example.com/static`` will be redirected to ``example1.sock``,
+``example2.sock``, ``example3.sock`` or ``example4.sock``
+backend servers. By default, Nginx uses round-robin algorithm for backend
+selection.
 
 .. note::
 
@@ -129,34 +135,24 @@ or backend crash.
 There are very many ways to do it: Supervisord, Upstart, Systemd,
 Gaffer, Circus, Runit etc.
 
-Here we'll use `Supervisord <http://supervisord.org/>`_ for example::
+Here we'll use `Supervisord <http://supervisord.org/>`_ for example:
 
-   [program:aiohttp_1]
-   cmd=/path/to/aiohttp_example.py 8081
+.. code-block:: cfg
+
+   [program:aiohttp]
+   numprocs = 4
+   numprocs_start = 1
+   process_name = example_%(process_num)s
+
+   ; Unix socket paths are specified by command line.
+   commmand=/path/to/aiohttp_example.py --path=/tmp/example_%(process_num)s.sock
+
+   ; We can just as easily pass TCP port numbers:
+   ; command=/path/to/aiohttp_example.py --port=808%(process_num)s
+
    user=nobody
    autostart=true
    autorestart=true
-
-   [program:aiohttp_2]
-   cmd=/path/to/aiohttp_example.py 8082
-   user=nobody
-   autostart=true
-   autorestart=true
-
-   [program:aiohttp_3]
-   cmd=/path/to/aiohttp_example.py 8083
-   user=nobody
-   autostart=true
-   autorestart=true
-
-   [program:aiohttp_4]
-   cmd=/path/to/aiohttp_example.py 8084
-   user=nobody
-   autostart=true
-   autorestart=true
-
-The config will run four aiohttp server instances, ports are specified
-by command line.
 
 aiohttp server
 --------------
@@ -164,14 +160,17 @@ aiohttp server
 The last step is preparing aiohttp server for working with supervisord.
 
 Assuming we have properly configured :class:`aiohttp.web.Application`
-and port is specified by command line the task is trivial::
+and port is specified by command line, the task is trivial:
+
+.. code-block:: python3
 
    # aiohttp_example.py
    import argparse
    from aiohttp import web
 
    parser = argparse.ArgumentParser(description="aiohttp server example")
-   parser.add_argument('port', type=int)
+   parser.add_argument('--path')
+   parser.add_argument('--port')
 
 
    if __name__ == '__main__':
@@ -179,10 +178,10 @@ and port is specified by command line the task is trivial::
        # configure app
 
        args = parser.parse_args()
-       web.run_app(app, port=args.port)
+       web.run_app(app, path=args.path, port=args.port)
 
 For real use cases we perhaps need to configure other things like
-logging etc. but it's out of scope of the topic.
+logging etc., but it's out of scope of the topic.
 
 
 .. _aiohttp-deployment-gunicorn:
@@ -196,7 +195,7 @@ pre-fork worker model.  Gunicorn launches your app as worker processes
 for handling incoming requests.
 
 In opposite to deployment with :ref:`bare Nginx
-<aiohttp-deployment-nginx-supervisord>` the solution doesn't need to
+<aiohttp-deployment-nginx-supervisord>` the solution does not need to
 manually run several aiohttp processes and use tool like supervisord
 for monitoring it. But nothing is for free: running aiohttp
 application under gunicorn is slightly slower.
@@ -226,7 +225,7 @@ Now that the virtual environment is ready, we'll proceed to install
 aiohttp and gunicorn::
 
   >> pip install gunicorn
-  >> pip install -e git+https://github.com/KeepSafe/aiohttp.git#egg=aiohttp
+  >> pip install -e git+https://github.com/aio-libs/aiohttp.git#egg=aiohttp
 
 
 Application
@@ -267,11 +266,11 @@ In this case, we will use:
   <http://docs.gunicorn.org/en/latest/design.html#how-many-workers>`_)
 
 The custom worker subclass is defined in
-*aiohttp.worker.GunicornWebWorker* and should be used instead of the
+*aiohttp.GunicornWebWorker* and should be used instead of the
 *gaiohttp* worker provided by Gunicorn, which supports only
 aiohttp.wsgi applications::
 
-  >> gunicorn my_app_module:my_web_app --bind localhost:8080 --worker-class aiohttp.worker.GunicornWebWorker
+  >> gunicorn my_app_module:my_web_app --bind localhost:8080 --worker-class aiohttp.GunicornWebWorker
   [2015-03-11 18:27:21 +0000] [1249] [INFO] Starting gunicorn 19.3.0
   [2015-03-11 18:27:21 +0000] [1249] [INFO] Listening at: http://127.0.0.1:8080 (1249)
   [2015-03-11 18:27:21 +0000] [1249] [INFO] Using worker: aiohttp.worker.GunicornWebWorker
@@ -284,7 +283,7 @@ worker processes.
 
    If you want to use an alternative asyncio event loop
    `uvloop <https://github.com/MagicStack/uvloop>`_, you can use the
-   ``aiohttp.worker.GunicornUVLoopWebWorker`` worker class.
+   ``aiohttp.GunicornUVLoopWebWorker`` worker class.
 
 
 More information
@@ -305,7 +304,7 @@ By default aiohttp uses own defaults::
 
    '%a %l %u %t "%r" %s %b "%{Referrer}i" "%{User-Agent}i"'
 
-For more information please read :ref:`Format Specification for Accees
+For more information please read :ref:`Format Specification for Access
 Log <aiohttp-logging-access-log-format-spec>`.
 
 .. disqus::
