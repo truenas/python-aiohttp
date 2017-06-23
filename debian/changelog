@@ -1,9 +1,9 @@
-python-aiohttp (2.2.0-1) UNRELEASED; urgency=medium
+python-aiohttp (2.2.0-1) unstable; urgency=medium
 
   * New upstream release
   * Standards-Version bumped to 4.0.0 (no changes needed)
 
- -- Piotr Ożarowski <piotr@debian.org>  Thu, 22 Jun 2017 22:51:59 +0200
+ -- Piotr Ożarowski <piotr@debian.org>  Fri, 23 Jun 2017 19:50:46 +0200
 
 python-aiohttp (1.2.0-1) unstable; urgency=medium
 
