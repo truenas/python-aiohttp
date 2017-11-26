@@ -1,3 +1,9 @@
+python-aiohttp (2.2.3-2) unstable; urgency=medium
+
+  * d/rules: clean generated C files. Closes: #880352.
+
+ -- Vincent Bernat <bernat@debian.org>  Sun, 26 Nov 2017 19:06:47 +0100
+
 python-aiohttp (2.2.3-1) unstable; urgency=medium
 
   * New upstream release
