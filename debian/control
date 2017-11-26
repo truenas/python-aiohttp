@@ -39,7 +39,6 @@ Description: http client/server for asyncio
 Package: python3-aiohttp-dbg
 Architecture: any
 Section: debug
-Priority: extra
 Depends: python3-aiohttp (= ${binary:Version}), ${shlibs:Depends}, ${misc:Depends}, ${python3:Depends}
 Description: http client/server for asyncio - debug version
  HTTP Client for asyncio (PEP 3156 - Asynchronous I/O Support).

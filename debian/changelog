@@ -1,7 +1,9 @@
 python-aiohttp (2.2.3-2) unstable; urgency=medium
 
+  * Team upload.
   * d/rules: clean generated C files. Closes: #880352.
   * d/control: bump Standards-Version to 4.1.1.
+  * d/watch: switch to HTTPS.
 
  -- Vincent Bernat <bernat@debian.org>  Sun, 26 Nov 2017 19:06:47 +0100
 
