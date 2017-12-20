@@ -6,6 +6,10 @@ import pytest
 
 pytest_plugins = 'pytester'
 
+CONFTEST = '''
+pytest_plugins = 'aiohttp.pytest_plugin'
+'''
+
 
 def test_aiohttp_plugin(testdir):
     testdir.makepyfile("""\
@@ -14,10 +18,6 @@ import pytest
 from unittest import mock
 
 from aiohttp import web
-
-
-pytest_plugins = 'aiohttp.pytest_plugin'
-
 
 @asyncio.coroutine
 def hello(request):
@@ -70,7 +70,7 @@ def test_hello_fails(test_client):
 
 @asyncio.coroutine
 def test_hello_with_fake_loop(test_client):
-    with pytest.raises(AssertionError):
+    with pytest.raises(RuntimeError):
         fake_loop = mock.Mock()
         yield from test_client(web.Application(loop=fake_loop))
 
@@ -151,19 +151,15 @@ def test_client_failed_to_create(test_client):
         yield from test_client(make_app)
 
 """)
-    testdir.runpytest('-p', 'no:sugar')
-
-    # i dont know how to fix this
-    # result = testdir.runpytest('-p', 'no:sugar')
-    # result.assert_outcomes(passed=11, failed=1)
+    testdir.makeconftest(CONFTEST)
+    result = testdir.runpytest('-p', 'no:sugar', '--loop=pyloop')
+    result.assert_outcomes(passed=11, failed=1)
 
 
 @pytest.mark.skipif(sys.version_info < (3, 5), reason='old python')
 def test_warning_checks(testdir, capsys):
     testdir.makepyfile("""\
 import asyncio
-
-pytest_plugins = 'aiohttp.pytest_plugin'
 
 async def foobar():
     return 123
@@ -175,8 +171,117 @@ async def test_good():
 async def test_bad():
     foobar()
 """)
-    result = testdir.runpytest('-p', 'no:sugar', '-s')
+    testdir.makeconftest(CONFTEST)
+    result = testdir.runpytest('-p', 'no:sugar', '-s', '--loop=pyloop')
     result.assert_outcomes(passed=1, failed=1)
     stdout, _ = capsys.readouterr()
     assert ("test_warning_checks.py:__LINE__:coroutine 'foobar' was "
             "never awaited" in re.sub('\d{2,}', '__LINE__', stdout))
+
+
+def test_aiohttp_plugin_async_fixture(testdir, capsys):
+    testdir.makepyfile("""\
+import asyncio
+import pytest
+
+from aiohttp import web
+
+
+@asyncio.coroutine
+def hello(request):
+    return web.Response(body=b'Hello, world')
+
+
+def create_app(loop):
+    app = web.Application()
+    app.router.add_route('GET', '/', hello)
+    return app
+
+
+@pytest.fixture
+@asyncio.coroutine
+def cli(test_client):
+    client = yield from test_client(create_app)
+    return client
+
+
+@pytest.fixture
+@asyncio.coroutine
+def foo():
+    return 42
+
+
+@pytest.fixture
+@asyncio.coroutine
+def bar(request):
+    # request should be accessible in async fixtures if needed
+    return request.function
+
+
+@asyncio.coroutine
+def test_hello(cli):
+    resp = yield from cli.get('/')
+    assert resp.status == 200
+
+
+def test_foo(loop, foo):
+    assert foo == 42
+
+
+def test_foo_without_loop(foo):
+    # will raise an error because there is no loop
+    pass
+
+
+def test_bar(loop, bar):
+    assert bar is test_bar
+""")
+    testdir.makeconftest(CONFTEST)
+    result = testdir.runpytest('-p', 'no:sugar', '--loop=pyloop')
+    result.assert_outcomes(passed=3, error=1)
+    result.stdout.fnmatch_lines(
+        "*Asynchronous fixtures must depend on the 'loop' fixture "
+        "or be used in tests depending from it."
+    )
+
+
+@pytest.mark.skipif(sys.version_info < (3, 6), reason='old python')
+def test_aiohttp_plugin_async_gen_fixture(testdir):
+    testdir.makepyfile("""\
+import asyncio
+import pytest
+from unittest import mock
+
+from aiohttp import web
+
+
+canary = mock.Mock()
+
+
+async def hello(request):
+    return web.Response(body=b'Hello, world')
+
+
+def create_app(loop):
+    app = web.Application()
+    app.router.add_route('GET', '/', hello)
+    return app
+
+
+@pytest.fixture
+async def cli(test_client):
+    yield await test_client(create_app)
+    canary()
+
+
+async def test_hello(cli):
+    resp = await cli.get('/')
+    assert resp.status == 200
+
+
+def test_finalized():
+    assert canary.called is True
+""")
+    testdir.makeconftest(CONFTEST)
+    result = testdir.runpytest('-p', 'no:sugar', '--loop=pyloop')
+    result.assert_outcomes(passed=2)

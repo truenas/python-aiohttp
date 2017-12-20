@@ -6,6 +6,7 @@ from aiohttp.web_urldispatcher import SystemRoute
 
 
 __all__ = (
+    'middleware',
     'normalize_path_middleware',
 )
 
@@ -21,6 +22,11 @@ def _check_request_resolves(request, path):
         return True, alt_request
 
     return False, request
+
+
+def middleware(f):
+    f.__middleware_version__ = 1
+    return f
 
 
 def normalize_path_middleware(
@@ -47,30 +53,42 @@ def normalize_path_middleware(
     """
 
     @asyncio.coroutine
-    def normalize_path_factory(app, handler):
-
-        @asyncio.coroutine
-        def middleware(request):
-
-            if isinstance(request.match_info.route, SystemRoute):
-                paths_to_check = []
+    @middleware
+    def impl(request, handler):
+        if isinstance(request.match_info.route, SystemRoute):
+            paths_to_check = []
+            if '?' in request.raw_path:
+                path, query = request.raw_path.split('?', 1)
+                if query:
+                    query = '?' + query
+            else:
+                query = ''
                 path = request.raw_path
-                if merge_slashes:
-                    paths_to_check.append(re.sub('//+', '/', path))
-                if append_slash and not request.path.endswith('/'):
-                    paths_to_check.append(path + '/')
-                if merge_slashes and append_slash:
-                    paths_to_check.append(
-                        re.sub('//+', '/', path + '/'))
 
-                for path in paths_to_check:
-                    resolves, request = yield from _check_request_resolves(
-                        request, path)
-                    if resolves:
-                        return redirect_class(request.path)
+            if merge_slashes:
+                paths_to_check.append(re.sub('//+', '/', path))
+            if append_slash and not request.path.endswith('/'):
+                paths_to_check.append(path + '/')
+            if merge_slashes and append_slash:
+                paths_to_check.append(
+                    re.sub('//+', '/', path + '/'))
 
+            for path in paths_to_check:
+                resolves, request = yield from _check_request_resolves(
+                    request, path)
+                if resolves:
+                    return redirect_class(request.path + query)
+
+        return (yield from handler(request))
+
+    return impl
+
+
+def _fix_request_current_app(app):
+
+    @middleware
+    @asyncio.coroutine
+    def impl(request, handler):
+        with request.match_info.set_current_app(app):
             return (yield from handler(request))
-
-        return middleware
-
-    return normalize_path_factory
+    return impl

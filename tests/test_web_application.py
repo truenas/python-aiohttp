@@ -4,7 +4,7 @@ from unittest import mock
 import pytest
 
 from aiohttp import helpers, log, web
-from aiohttp.abc import AbstractRouter
+from aiohttp.abc import AbstractAccessLogger, AbstractRouter
 
 
 def test_app_ctor(loop):
@@ -65,6 +65,7 @@ def test_app_make_handler_debug_exc(loop, mocker, debug):
     app.make_handler(loop=loop)
     srv.assert_called_with(app._handle,
                            request_factory=app._make_request,
+                           access_log_class=mock.ANY,
                            loop=loop,
                            debug=debug)
 
@@ -76,7 +77,31 @@ def test_app_make_handler_args(loop, mocker):
     app.make_handler(loop=loop)
     srv.assert_called_with(app._handle,
                            request_factory=app._make_request,
+                           access_log_class=mock.ANY,
                            loop=loop, debug=mock.ANY, test=True)
+
+
+def test_app_make_handler_access_log_class(loop, mocker):
+    class Logger:
+        pass
+
+    app = web.Application()
+
+    with pytest.raises(TypeError):
+        app.make_handler(access_log_class=Logger, loop=loop)
+
+    class Logger(AbstractAccessLogger):
+
+        def log(self, request, response, time):
+            self.logger.info('msg')
+
+    srv = mocker.patch('aiohttp.web.Server')
+
+    app.make_handler(access_log_class=Logger, loop=loop)
+    srv.assert_called_with(app._handle,
+                           access_log_class=Logger,
+                           request_factory=app._make_request,
+                           loop=loop, debug=mock.ANY)
 
 
 @asyncio.coroutine
@@ -201,27 +226,6 @@ def test_app_freeze():
 
     app.freeze()
     assert len(subapp.freeze.call_args_list) == 1
-
-
-def test_secure_proxy_ssl_header_default():
-    app = web.Application()
-    assert app._secure_proxy_ssl_header is None
-
-
-def test_secure_proxy_ssl_header_non_default(loop):
-    app = web.Application()
-    hdr = ('X-Forwarded-Proto', 'https')
-    app.make_handler(secure_proxy_ssl_header=hdr, loop=loop)
-    assert app._secure_proxy_ssl_header is hdr
-
-
-def test_secure_proxy_ssl_header_init(loop):
-    hdr = ('X-Forwarded-Proto', 'https')
-    with pytest.warns(DeprecationWarning):
-        app = web.Application(secure_proxy_ssl_header=hdr)
-    assert app._secure_proxy_ssl_header is hdr
-    app.make_handler(loop=loop)
-    assert app._secure_proxy_ssl_header is hdr
 
 
 def test_equality():

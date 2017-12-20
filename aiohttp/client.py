@@ -15,8 +15,8 @@ from yarl import URL
 from . import connector as connector_mod
 from . import client_exceptions, client_reqrep, hdrs, http, payload
 from .client_exceptions import *  # noqa
-from .client_exceptions import (ClientError, ClientOSError, ServerTimeoutError,
-                                WSServerHandshakeError)
+from .client_exceptions import (ClientError, ClientOSError, InvalidURL,
+                                ServerTimeoutError, WSServerHandshakeError)
 from .client_reqrep import *  # noqa
 from .client_reqrep import ClientRequest, ClientResponse
 from .client_ws import ClientWebSocketResponse
@@ -24,8 +24,10 @@ from .connector import *  # noqa
 from .connector import TCPConnector
 from .cookiejar import CookieJar
 from .helpers import (PY_35, CeilTimeout, TimeoutHandle, _BaseCoroMixin,
-                      deprecated_noop, sentinel)
+                      deprecated_noop, proxies_from_env, sentinel,
+                      strip_auth_from_url)
 from .http import WS_KEY, WebSocketReader, WebSocketWriter
+from .http_websocket import WSHandshakeError, ws_ext_gen, ws_ext_parse
 from .streams import FlowControlDataQueue
 
 
@@ -54,7 +56,8 @@ class ClientSession:
                  ws_response_class=ClientWebSocketResponse,
                  version=http.HttpVersion11,
                  cookie_jar=None, connector_owner=True, raise_for_status=False,
-                 read_timeout=sentinel, conn_timeout=None):
+                 read_timeout=sentinel, conn_timeout=None,
+                 auto_decompress=True, trust_env=False):
 
         implicit_loop = False
         if loop is None:
@@ -102,6 +105,8 @@ class ClientSession:
                               else DEFAULT_TIMEOUT)
         self._conn_timeout = conn_timeout
         self._raise_for_status = raise_for_status
+        self._auto_decompress = auto_decompress
+        self._trust_env = trust_env
 
         # Convert to list of tuples
         if headers:
@@ -121,8 +126,6 @@ class ClientSession:
 
     def __del__(self, _warnings=warnings):
         if not self.closed:
-            self.close()
-
             _warnings.warn("Unclosed client session {!r}".format(self),
                            ResourceWarning)
             context = {'client_session': self,
@@ -152,7 +155,11 @@ class ClientSession:
                  read_until_eof=True,
                  proxy=None,
                  proxy_auth=None,
-                 timeout=sentinel):
+                 timeout=sentinel,
+                 verify_ssl=None,
+                 fingerprint=None,
+                 ssl_context=None,
+                 proxy_headers=None):
 
         # NOTE: timeout clamps existing connect and read timeouts.  We cannot
         # set the default to None because we need to detect if the user wants
@@ -183,15 +190,12 @@ class ClientSession:
 
         # Merge with default headers and transform to CIMultiDict
         headers = self._prepare_headers(headers)
-        if auth is None:
-            auth = self._default_auth
-        # It would be confusing if we support explicit Authorization header
-        # with `auth` argument
-        if (headers is not None and
-                auth is not None and
-                hdrs.AUTHORIZATION in headers):
-            raise ValueError("Can't combine `Authorization` header with "
-                             "`auth` argument")
+        proxy_headers = self._prepare_headers(proxy_headers)
+
+        try:
+            url = URL(url)
+        except ValueError:
+            raise InvalidURL(url)
 
         skip_headers = set(self._skip_auto_headers)
         if skip_auto_headers is not None:
@@ -199,7 +203,10 @@ class ClientSession:
                 skip_headers.add(istr(i))
 
         if proxy is not None:
-            proxy = URL(proxy)
+            try:
+                proxy = URL(proxy)
+            except ValueError:
+                raise InvalidURL(url)
 
         # timeout is cumulative for all request operations
         # (request, redirects, responses, data consuming)
@@ -208,12 +215,39 @@ class ClientSession:
             timeout if timeout is not sentinel else self._read_timeout)
         handle = tm.start()
 
+        url = URL(url)
         timer = tm.timer()
         try:
             with timer:
                 while True:
-                    url = URL(url).with_fragment(None)
+                    url, auth_from_url = strip_auth_from_url(url)
+                    if auth and auth_from_url:
+                        raise ValueError("Cannot combine AUTH argument with "
+                                         "credentials encoded in URL")
+
+                    if auth is None:
+                        auth = auth_from_url
+                    if auth is None:
+                        auth = self._default_auth
+                    # It would be confusing if we support explicit
+                    # Authorization header with auth argument
+                    if (headers is not None and
+                            auth is not None and
+                            hdrs.AUTHORIZATION in headers):
+                        raise ValueError("Cannot combine AUTHORIZATION header "
+                                         "with AUTH argument or credentials "
+                                         "encoded in URL")
+
+                    url = url.with_fragment(None)
                     cookies = self._cookie_jar.filter_cookies(url)
+
+                    if proxy is not None:
+                        proxy = URL(proxy)
+                    elif self._trust_env:
+                        for scheme, proxy_info in proxies_from_env().items():
+                            if scheme == url.scheme:
+                                proxy, proxy_auth = proxy_info
+                                break
 
                     req = self._request_class(
                         method, url, params=params, headers=headers,
@@ -223,7 +257,9 @@ class ClientSession:
                         expect100=expect100, loop=self._loop,
                         response_class=self._response_class,
                         proxy=proxy, proxy_auth=proxy_auth, timer=timer,
-                        session=self)
+                        session=self, auto_decompress=self._auto_decompress,
+                        verify_ssl=verify_ssl, fingerprint=fingerprint,
+                        ssl_context=ssl_context, proxy_headers=proxy_headers)
 
                     # connection timeout
                     try:
@@ -251,7 +287,8 @@ class ClientSession:
                     self._cookie_jar.update_cookies(resp.cookies, resp.url)
 
                     # redirects
-                    if resp.status in (301, 302, 303, 307) and allow_redirects:
+                    if resp.status in (
+                            301, 302, 303, 307, 308) and allow_redirects:
                         redirects += 1
                         history.append(resp)
                         if max_redirects and redirects >= max_redirects:
@@ -274,13 +311,15 @@ class ClientSession:
                         r_url = (resp.headers.get(hdrs.LOCATION) or
                                  resp.headers.get(hdrs.URI))
                         if r_url is None:
-                            raise RuntimeError(
-                                "{0.method} {0.url} returns "
-                                "a redirect [{0.status}] status "
-                                "but response lacks a Location "
-                                "or URI HTTP header".format(resp))
-                        r_url = URL(
-                            r_url, encoded=not self.requote_redirect_url)
+                            # see github.com/aio-libs/aiohttp/issues/2022
+                            break
+
+                        try:
+                            r_url = URL(
+                                r_url, encoded=not self.requote_redirect_url)
+
+                        except ValueError:
+                            raise InvalidURL(r_url)
 
                         scheme = r_url.scheme
                         if scheme not in ('http', 'https', ''):
@@ -289,6 +328,10 @@ class ClientSession:
                                 'Can redirect only to http or https')
                         elif not scheme:
                             r_url = url.join(r_url)
+
+                        if url.origin() != r_url.origin():
+                            auth = None
+                            headers.pop(hdrs.AUTHORIZATION, None)
 
                         url = r_url
                         params = None
@@ -331,7 +374,12 @@ class ClientSession:
                    origin=None,
                    headers=None,
                    proxy=None,
-                   proxy_auth=None):
+                   proxy_auth=None,
+                   verify_ssl=None,
+                   fingerprint=None,
+                   ssl_context=None,
+                   proxy_headers=None,
+                   compress=0):
         """Initiate websocket connection."""
         return _WSRequestContextManager(
             self._ws_connect(url,
@@ -345,7 +393,12 @@ class ClientSession:
                              origin=origin,
                              headers=headers,
                              proxy=proxy,
-                             proxy_auth=proxy_auth))
+                             proxy_auth=proxy_auth,
+                             verify_ssl=verify_ssl,
+                             fingerprint=fingerprint,
+                             ssl_context=ssl_context,
+                             proxy_headers=proxy_headers,
+                             compress=compress))
 
     @asyncio.coroutine
     def _ws_connect(self, url, *,
@@ -359,7 +412,12 @@ class ClientSession:
                     origin=None,
                     headers=None,
                     proxy=None,
-                    proxy_auth=None):
+                    proxy_auth=None,
+                    verify_ssl=None,
+                    fingerprint=None,
+                    ssl_context=None,
+                    proxy_headers=None,
+                    compress=0):
 
         if headers is None:
             headers = CIMultiDict()
@@ -381,13 +439,20 @@ class ClientSession:
             headers[hdrs.SEC_WEBSOCKET_PROTOCOL] = ','.join(protocols)
         if origin is not None:
             headers[hdrs.ORIGIN] = origin
+        if compress:
+            extstr = ws_ext_gen(compress=compress)
+            headers[hdrs.SEC_WEBSOCKET_EXTENSIONS] = extstr
 
         # send request
         resp = yield from self.get(url, headers=headers,
                                    read_until_eof=False,
                                    auth=auth,
                                    proxy=proxy,
-                                   proxy_auth=proxy_auth)
+                                   proxy_auth=proxy_auth,
+                                   verify_ssl=verify_ssl,
+                                   fingerprint=fingerprint,
+                                   ssl_context=ssl_context,
+                                   proxy_headers=proxy_headers)
 
         try:
             # check handshake
@@ -439,12 +504,32 @@ class ClientSession:
                         protocol = proto
                         break
 
+            # websocket compress
+            notakeover = False
+            if compress:
+                compress_hdrs = resp.headers.get(hdrs.SEC_WEBSOCKET_EXTENSIONS)
+                if compress_hdrs:
+                    try:
+                        compress, notakeover = ws_ext_parse(compress_hdrs)
+                    except WSHandshakeError as exc:
+                        raise WSServerHandshakeError(
+                            resp.request_info,
+                            resp.history,
+                            message=exc.args[0],
+                            code=resp.status,
+                            headers=resp.headers)
+                else:
+                    compress = 0
+                    notakeover = False
+
             proto = resp.connection.protocol
             reader = FlowControlDataQueue(
                 proto, limit=2 ** 16, loop=self._loop)
             proto.set_parser(WebSocketReader(reader), reader)
             resp.connection.writer.set_tcp_nodelay(True)
-            writer = WebSocketWriter(resp.connection.writer, use_mask=True)
+            writer = WebSocketWriter(
+                resp.connection.writer, use_mask=True,
+                compress=compress, notakeover=notakeover)
         except Exception:
             resp.close()
             raise
@@ -458,7 +543,9 @@ class ClientSession:
                                            autoping,
                                            self._loop,
                                            receive_timeout=receive_timeout,
-                                           heartbeat=heartbeat)
+                                           heartbeat=heartbeat,
+                                           compress=compress,
+                                           client_notakeover=notakeover)
 
     def _prepare_headers(self, headers):
         """ Add default headers and transform it to CIMultiDict
@@ -586,7 +673,7 @@ class ClientSession:
 
         @asyncio.coroutine
         def __aexit__(self, exc_type, exc_val, exc_tb):
-            self.close()
+            yield from self.close()
 
 
 class _BaseRequestContextManager(_BaseCoroMixin):
@@ -635,16 +722,16 @@ class _SessionRequestContextManager(_RequestContextManager):
     def __iter__(self):
         try:
             return (yield from self._coro)
-        except:
-            self._session.close()
+        except BaseException:
+            yield from self._session.close()
             raise
 
     if PY_35:
         def __await__(self):
             try:
                 return (yield from self._coro)
-            except:
-                self._session.close()
+            except BaseException:
+                yield from self._session.close()
                 raise
 
 

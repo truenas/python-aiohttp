@@ -3,6 +3,7 @@ import io
 import json
 import mimetypes
 import os
+import warnings
 from abc import ABC, abstractmethod
 
 from multidict import CIMultiDict
@@ -17,6 +18,8 @@ __all__ = ('PAYLOAD_REGISTRY', 'get_payload', 'payload_type', 'Payload',
            'BytesPayload', 'StringPayload', 'StreamReaderPayload',
            'IOBasePayload', 'BytesIOPayload', 'BufferedReaderPayload',
            'TextIOPayload', 'StringIOPayload', 'JsonPayload')
+
+TOO_LARGE_BYTES_BODY = 2 ** 20
 
 
 class LookupError(Exception):
@@ -116,12 +119,7 @@ class Payload(ABC):
             return Payload._content_type
 
     def set_content_disposition(self, disptype, quote_fields=True, **params):
-        """Sets ``Content-Disposition`` header.
-
-        :param str disptype: Disposition type: inline, attachment, form-data.
-                            Should be valid extension token (see RFC 2183)
-        :param dict params: Disposition params
-        """
+        """Sets ``Content-Disposition`` header."""
         if self._headers is None:
             self._headers = CIMultiDict()
 
@@ -131,9 +129,9 @@ class Payload(ABC):
     @asyncio.coroutine  # pragma: no branch
     @abstractmethod
     def write(self, writer):
-        """Write payload
+        """Write payload.
 
-        :param AbstractPayloadWriter writer:
+        writer is an AbstractPayloadWriter instance:
         """
 
 
@@ -149,6 +147,11 @@ class BytesPayload(Payload):
         super().__init__(value, *args, **kwargs)
 
         self._size = len(value)
+
+        if self._size > TOO_LARGE_BYTES_BODY:
+            warnings.warn("Sending a large body directly with raw bytes might"
+                          " lock the event loop. You should probably pass an "
+                          "io.BytesIO object instead", ResourceWarning)
 
     @asyncio.coroutine
     def write(self, writer):
@@ -174,6 +177,12 @@ class StringPayload(BytesPayload):
         super().__init__(
             value.encode(encoding),
             encoding=encoding, content_type=content_type, *args, **kwargs)
+
+
+class StringIOPayload(StringPayload):
+
+    def __init__(self, value, *args, **kwargs):
+        super().__init__(value.read(), *args, **kwargs)
 
 
 class IOBasePayload(Payload):
@@ -236,18 +245,14 @@ class TextIOPayload(IOBasePayload):
             self._value.close()
 
 
-class StringIOPayload(TextIOPayload):
-
-    @property
-    def size(self):
-        return len(self._value.getvalue()) - self._value.tell()
-
-
 class BytesIOPayload(IOBasePayload):
 
     @property
     def size(self):
-        return len(self._value.getbuffer()) - self._value.tell()
+        p = self._value.tell()
+        l = self._value.seek(0, os.SEEK_END)
+        self._value.seek(p)
+        return l - p
 
 
 class BufferedReaderPayload(IOBasePayload):

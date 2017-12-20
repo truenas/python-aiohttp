@@ -179,11 +179,17 @@ class FileResponse(StreamResponse):
         modsince = request.if_modified_since
         if modsince is not None and st.st_mtime <= modsince.timestamp():
             self.set_status(HTTPNotModified.status_code)
+            self._length_check = False
             return (yield from super().prepare(request))
 
-        ct, encoding = mimetypes.guess_type(str(filepath))
-        if not ct:
-            ct = 'application/octet-stream'
+        if hdrs.CONTENT_TYPE not in self.headers:
+            ct, encoding = mimetypes.guess_type(str(filepath))
+            if not ct:
+                ct = 'application/octet-stream'
+            should_set_ct = True
+        else:
+            encoding = 'gzip' if gzip else None
+            should_set_ct = False
 
         status = HTTPOk.status_code
         file_size = st.st_size
@@ -223,7 +229,8 @@ class FileResponse(StreamResponse):
             status = HTTPPartialContent.status_code
 
         self.set_status(status)
-        self.content_type = ct
+        if should_set_ct:
+            self.content_type = ct
         if encoding:
             self.headers[hdrs.CONTENT_ENCODING] = encoding
         if gzip:

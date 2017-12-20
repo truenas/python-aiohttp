@@ -2,18 +2,21 @@ import asyncio
 import collections
 import io
 import json
+import ssl
 import sys
 import traceback
 import warnings
+from collections import namedtuple
+from hashlib import md5, sha1, sha256
 from http.cookies import CookieError, Morsel
-from urllib.request import getproxies
 
 from multidict import CIMultiDict, CIMultiDictProxy, MultiDict, MultiDictProxy
 from yarl import URL
 
 from . import hdrs, helpers, http, payload
 from .client_exceptions import (ClientConnectionError, ClientOSError,
-                                ClientResponseError)
+                                ClientResponseError, ContentTypeError,
+                                InvalidURL)
 from .formdata import FormData
 from .helpers import PY_35, HeadersMixin, SimpleCookie, TimerNoop, noop
 from .http import SERVER_SOFTWARE, HttpVersion10, HttpVersion11, PayloadWriter
@@ -27,19 +30,35 @@ except ImportError:  # pragma: no cover
     import chardet
 
 
-__all__ = ('ClientRequest', 'ClientResponse')
+__all__ = ('ClientRequest', 'ClientResponse', 'RequestInfo')
 
 
 RequestInfo = collections.namedtuple(
     'RequestInfo', ('url', 'method', 'headers'))
 
 
-class ClientRequest:
+HASHFUNC_BY_DIGESTLEN = {
+    16: md5,
+    20: sha1,
+    32: sha256,
+}
 
-    GET_METHODS = {hdrs.METH_GET, hdrs.METH_HEAD, hdrs.METH_OPTIONS}
+
+_SSL_OP_NO_COMPRESSION = getattr(ssl, "OP_NO_COMPRESSION", 0)
+
+
+ConnectionKey = namedtuple('ConnectionKey', ['host', 'port', 'ssl'])
+
+
+class ClientRequest:
+    GET_METHODS = {
+        hdrs.METH_GET,
+        hdrs.METH_HEAD,
+        hdrs.METH_OPTIONS,
+        hdrs.METH_TRACE,
+    }
     POST_METHODS = {hdrs.METH_PATCH, hdrs.METH_POST, hdrs.METH_PUT}
-    ALL_METHODS = GET_METHODS.union(POST_METHODS).union(
-        {hdrs.METH_DELETE, hdrs.METH_TRACE})
+    ALL_METHODS = GET_METHODS.union(POST_METHODS).union({hdrs.METH_DELETE})
 
     DEFAULT_HEADERS = {
         hdrs.ACCEPT: '*/*',
@@ -65,8 +84,15 @@ class ClientRequest:
                  auth=None, version=http.HttpVersion11, compress=None,
                  chunked=None, expect100=False,
                  loop=None, response_class=None,
-                 proxy=None, proxy_auth=None, proxy_from_env=False,
-                 timer=None, session=None):
+                 proxy=None, proxy_auth=None,
+                 timer=None, session=None, auto_decompress=True,
+                 verify_ssl=None, fingerprint=None, ssl_context=None,
+                 proxy_headers=None):
+
+        if verify_ssl is False and ssl_context is not None:
+            raise ValueError(
+                "Either disable ssl certificate validation by "
+                "verify_ssl=False or specify ssl_context, not both.")
 
         if loop is None:
             loop = asyncio.get_event_loop()
@@ -88,6 +114,9 @@ class ClientRequest:
         self.length = None
         self.response_class = response_class or ClientResponse
         self._timer = timer if timer is not None else TimerNoop()
+        self._auto_decompress = auto_decompress
+        self._verify_ssl = verify_ssl
+        self._ssl_context = ssl_context
 
         if loop.get_debug():
             self._source_traceback = traceback.extract_stack(sys._getframe(1))
@@ -99,11 +128,17 @@ class ClientRequest:
         self.update_cookies(cookies)
         self.update_content_encoding(data)
         self.update_auth(auth)
-        self.update_proxy(proxy, proxy_auth, proxy_from_env)
+        self.update_proxy(proxy, proxy_auth, proxy_headers)
+        self.update_fingerprint(fingerprint)
 
         self.update_body_from_data(data)
-        self.update_transfer_encoding()
+        if data or self.method not in self.GET_METHODS:
+            self.update_transfer_encoding()
         self.update_expect_continue(expect100)
+
+    @property
+    def connection_key(self):
+        return ConnectionKey(self.host, self.port, self.ssl)
 
     @property
     def host(self):
@@ -121,8 +156,7 @@ class ClientRequest:
         """Update destination host, port and connection type (ssl)."""
         # get host/port
         if not url.host:
-            raise ValueError(
-                "Could not parse hostname from URL '{}'".format(url))
+            raise InvalidURL(url)
 
         # basic auth info
         username, password = url.user, url.password
@@ -161,7 +195,7 @@ class ClientRequest:
 
     def update_auto_headers(self, skip_auto_headers):
         self.skip_auto_headers = CIMultiDict(
-            (hdr, None) for hdr in skip_auto_headers)
+            (hdr, None) for hdr in sorted(skip_auto_headers))
         used_headers = self.headers.copy()
         used_headers.extend(self.skip_auto_headers)
 
@@ -295,16 +329,44 @@ class ClientRequest:
         if expect:
             self._continue = helpers.create_future(self.loop)
 
-    def update_proxy(self, proxy, proxy_auth, proxy_from_env):
-        if proxy_from_env and not proxy:
-            proxy_url = getproxies().get(self.original_url.scheme)
-            proxy = URL(proxy_url) if proxy_url else None
+    def update_proxy(self, proxy, proxy_auth, proxy_headers):
         if proxy and not proxy.scheme == 'http':
             raise ValueError("Only http proxies are supported")
         if proxy_auth and not isinstance(proxy_auth, helpers.BasicAuth):
             raise ValueError("proxy_auth must be None or BasicAuth() tuple")
         self.proxy = proxy
         self.proxy_auth = proxy_auth
+        self.proxy_headers = proxy_headers
+
+    def update_fingerprint(self, fingerprint):
+        if fingerprint:
+            digestlen = len(fingerprint)
+            hashfunc = HASHFUNC_BY_DIGESTLEN.get(digestlen)
+            if not hashfunc:
+                raise ValueError('fingerprint has invalid length')
+            elif hashfunc is md5 or hashfunc is sha1:
+                warnings.warn('md5 and sha1 are insecure and deprecated. '
+                              'Use sha256.',
+                              DeprecationWarning, stacklevel=2)
+                client_logger.warn('md5 and sha1 are insecure and deprecated. '
+                                   'Use sha256.')
+            self._hashfunc = hashfunc
+        self._fingerprint = fingerprint
+
+    @property
+    def verify_ssl(self):
+        """Do check for ssl certifications?"""
+        return self._verify_ssl
+
+    @property
+    def fingerprint(self):
+        """Expected ssl certificate fingerprint."""
+        return self._fingerprint
+
+    @property
+    def ssl_context(self):
+        """SSLContext instance for https requests."""
+        return self._ssl_context
 
     def keep_alive(self):
         if self.version < HttpVersion10:
@@ -406,7 +468,8 @@ class ClientRequest:
         self.response = self.response_class(
             self.method, self.original_url,
             writer=self._writer, continue100=self._continue, timer=self._timer,
-            request_info=self.request_info
+            request_info=self.request_info,
+            auto_decompress=self._auto_decompress
         )
 
         self.response._post_init(self.loop, self._session)
@@ -450,7 +513,7 @@ class ClientResponse(HeadersMixin):
 
     def __init__(self, method, url, *,
                  writer=None, continue100=None, timer=None,
-                 request_info=None):
+                 request_info=None, auto_decompress=True):
         assert isinstance(url, URL)
 
         self.method = method
@@ -465,6 +528,7 @@ class ClientResponse(HeadersMixin):
         self._history = ()
         self._request_info = request_info
         self._timer = timer if timer is not None else TimerNoop()
+        self._auto_decompress = auto_decompress
 
     @property
     def url(self):
@@ -550,7 +614,8 @@ class ClientResponse(HeadersMixin):
             timer=self._timer,
             skip_payload=self.method.lower() == 'head',
             skip_status_codes=(204, 304),
-            read_until_eof=read_until_eof)
+            read_until_eof=read_until_eof,
+            auto_decompress=self._auto_decompress)
 
         with self._timer:
             while True:
@@ -653,7 +718,7 @@ class ClientResponse(HeadersMixin):
                 headers=self.headers)
 
     def _cleanup_writer(self):
-        if self._writer is not None and not self._writer.done():
+        if self._writer is not None:
             self._writer.cancel()
         self._writer = None
         self._session = None
@@ -722,7 +787,7 @@ class ClientResponse(HeadersMixin):
         if content_type:
             ctype = self.headers.get(hdrs.CONTENT_TYPE, '').lower()
             if content_type not in ctype:
-                raise ClientResponseError(
+                raise ContentTypeError(
                     self.request_info,
                     self.history,
                     message=('Attempt to decode JSON with '
