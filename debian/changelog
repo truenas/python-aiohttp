@@ -1,6 +1,7 @@
 python-aiohttp (2.3.6-1) unstable; urgency=medium
 
   * New upstream release
+  * Standards-Version bumped to 4.1.2 (d/copyright format URL switch to HTTPS)
 
  -- Piotr Ożarowski <piotr@debian.org>  Wed, 20 Dec 2017 12:01:51 +0100
 
