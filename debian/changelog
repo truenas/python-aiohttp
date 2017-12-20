@@ -1,3 +1,9 @@
+python-aiohttp (2.3.6-1) unstable; urgency=medium
+
+  * New upstream release
+
+ -- Piotr Ożarowski <piotr@debian.org>  Wed, 20 Dec 2017 12:01:51 +0100
+
 python-aiohttp (2.2.3-2) unstable; urgency=medium
 
   * Team upload.
