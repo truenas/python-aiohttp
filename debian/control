@@ -17,6 +17,7 @@ Build-Depends: debhelper (>= 10),
                cython3,
 # for tests:
                python3-pytest,
+               python3-pytest-mock,
                python3-chardet,
                python3-gunicorn
 Standards-Version: 4.1.2
