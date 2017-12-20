@@ -55,7 +55,6 @@ extensions = [
     'sphinx.ext.intersphinx',
     'alabaster',
     'sphinxcontrib.asyncio',
-    'sphinxcontrib.newsfeed',
 ]
 
 
@@ -87,7 +86,7 @@ source_suffix = '.rst'
 # source_encoding = 'utf-8-sig'
 
 # The master toctree document.
-master_doc = 'index'
+master_doc = 'toc'
 
 # General information about the project.
 project = 'aiohttp'
@@ -156,6 +155,7 @@ html_theme = 'alabaster'
 html_theme_options = {
     'logo': 'aiohttp-icon-128x128.png',
     'description': 'http client/server for asyncio',
+    'canonical_url': 'http://docs.aiohttp.org/en/stable/',
     'github_user': 'aio-libs',
     'github_repo': 'aiohttp',
     'github_button': True,
@@ -326,6 +326,3 @@ texinfo_documents = [
 
 # If true, do not generate a @detailmenu in the "Top" node's menu.
 # texinfo_no_detailmenu = False
-
-
-disqus_shortname = 'aiohttp'

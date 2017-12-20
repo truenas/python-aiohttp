@@ -17,10 +17,13 @@ except ImportError:
 
 ext = '.pyx' if USE_CYTHON else '.c'
 
+
 extensions = [Extension('aiohttp._websocket', ['aiohttp/_websocket' + ext]),
               Extension('aiohttp._http_parser',
                         ['aiohttp/_http_parser' + ext,
-                         'vendor/http-parser/http_parser.c'],),
+                         'vendor/http-parser/http_parser.c'],
+                        define_macros=[('HTTP_PARSER_STRICT', 0)],
+                        ),
               Extension('aiohttp._frozenlist',
                         ['aiohttp/_frozenlist' + ext])]
 
@@ -59,11 +62,8 @@ with codecs.open(os.path.join(os.path.abspath(os.path.dirname(
         raise RuntimeError('Unable to determine version.')
 
 
-install_requires = ['chardet', 'multidict>=2.1.4',
+install_requires = ['chardet', 'multidict>=3.0.0',
                     'async_timeout>=1.2.0', 'yarl>=0.11']
-
-if sys.version_info < (3, 4, 2):
-    raise RuntimeError("aiohttp requires Python 3.4.2+")
 
 
 def read(f):
@@ -75,7 +75,6 @@ class PyTest(TestCommand):
 
     def run(self):
         import subprocess
-        import sys
         errno = subprocess.call([sys.executable, '-m', 'pytest', 'tests'])
         raise SystemExit(errno)
 
@@ -111,6 +110,7 @@ args = dict(
     url='https://github.com/aio-libs/aiohttp/',
     license='Apache 2',
     packages=['aiohttp'],
+    python_requires='>=3.4.2',
     install_requires=install_requires,
     tests_require=tests_require,
     include_package_data=True,

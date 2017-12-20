@@ -1,6 +1,5 @@
 import asyncio
 import collections
-import traceback
 
 from . import helpers
 from .log import internal_logger
@@ -40,6 +39,14 @@ if helpers.PY_35:
                 raise StopAsyncIteration  # NOQA
             return rv
 
+    class ChunkTupleAsyncStreamIterator(AsyncStreamIterator):
+        @asyncio.coroutine
+        def __anext__(self):
+            rv = yield from self.read_func()
+            if rv == (b'', False):
+                raise StopAsyncIteration  # NOQA
+            return rv
+
 
 class AsyncStreamReaderMixin:
 
@@ -58,20 +65,21 @@ class AsyncStreamReaderMixin:
             return AsyncStreamIterator(lambda: self.read(n))
 
         def iter_any(self):
-            """Returns an asynchronous iterator that yields slices of data
-            as they come.
+            """Returns an asynchronous iterator that yields all the available
+            data as soon as it is received
 
             Python-3.5 available for Python 3.5+ only
             """
             return AsyncStreamIterator(self.readany)
 
         def iter_chunks(self):
-            """Returns an asynchronous iterator that yields chunks of the
-            size as received by the server.
+            """Returns an asynchronous iterator that yields chunks of data
+            as they are received by the server. The yielded objects are tuples
+            of (bytes, bool) as returned by the StreamReader.readchunk method.
 
             Python-3.5 available for Python 3.5+ only
             """
-            return AsyncStreamIterator(self.readchunk)
+            return ChunkTupleAsyncStreamIterator(self.readchunk)
 
 
 class StreamReader(AsyncStreamReaderMixin):
@@ -96,6 +104,8 @@ class StreamReader(AsyncStreamReaderMixin):
             loop = asyncio.get_event_loop()
         self._loop = loop
         self._size = 0
+        self._cursor = 0
+        self._http_chunk_splits = None
         self._buffer = collections.deque()
         self._buffer_offset = 0
         self._eof = False
@@ -200,7 +210,9 @@ class StreamReader(AsyncStreamReaderMixin):
             self._buffer[0] = self._buffer[0][self._buffer_offset:]
             self._buffer_offset = 0
         self._size += len(data)
+        self._cursor -= len(data)
         self._buffer.appendleft(data)
+        self._eof_counter = 0
 
     def feed_data(self, data):
         assert not self._eof, 'feed_data after feed_eof'
@@ -217,6 +229,18 @@ class StreamReader(AsyncStreamReaderMixin):
             self._waiter = None
             if not waiter.done():
                 waiter.set_result(False)
+
+    def begin_http_chunk_receiving(self):
+        if self._http_chunk_splits is None:
+            self._http_chunk_splits = []
+
+    def end_http_chunk_receiving(self):
+        if self._http_chunk_splits is None:
+            raise RuntimeError("Called end_chunk_receiving without calling "
+                               "begin_chunk_receiving first")
+        if not self._http_chunk_splits or \
+                self._http_chunk_splits[-1] != self.total_bytes:
+            self._http_chunk_splits.append(self.total_bytes)
 
     @asyncio.coroutine
     def _wait(self, func_name):
@@ -282,10 +306,9 @@ class StreamReader(AsyncStreamReaderMixin):
             if self._eof and not self._buffer:
                 self._eof_counter = getattr(self, '_eof_counter', 0) + 1
                 if self._eof_counter > 5:
-                    stack = traceback.format_stack()
                     internal_logger.warning(
                         'Multiple access to StreamReader in eof state, '
-                        'might be infinite loop: \n%s', stack)
+                        'might be infinite loop.', stack_info=True)
 
         if not n:
             return b''
@@ -320,13 +343,34 @@ class StreamReader(AsyncStreamReaderMixin):
 
     @asyncio.coroutine
     def readchunk(self):
+        """Returns a tuple of (data, end_of_http_chunk). When chunked transfer
+        encoding is used, end_of_http_chunk is a boolean indicating if the end
+        of the data corresponds to the end of a HTTP chunk , otherwise it is
+        always False.
+        """
         if self._exception is not None:
             raise self._exception
 
         if not self._buffer and not self._eof:
+            if (self._http_chunk_splits and
+                    self._cursor == self._http_chunk_splits[0]):
+                # end of http chunk without available data
+                self._http_chunk_splits = self._http_chunk_splits[1:]
+                return (b"", True)
             yield from self._wait('readchunk')
 
-        return self._read_nowait_chunk(-1)
+        if not self._buffer:
+            # end of file
+            return (b"", False)
+        elif self._http_chunk_splits is not None:
+            while self._http_chunk_splits:
+                pos = self._http_chunk_splits[0]
+                self._http_chunk_splits = self._http_chunk_splits[1:]
+                if pos > self._cursor:
+                    return (self._read_nowait(pos-self._cursor), True)
+            return (self._read_nowait(-1), False)
+        else:
+            return (self._read_nowait_chunk(-1), False)
 
     @asyncio.coroutine
     def readexactly(self, n):
@@ -375,6 +419,7 @@ class StreamReader(AsyncStreamReaderMixin):
             data = self._buffer.popleft()
 
         self._size -= len(data)
+        self._cursor += len(data)
         return data
 
     def _read_nowait(self, n):
@@ -435,7 +480,7 @@ class EmptyStreamReader(AsyncStreamReaderMixin):
 
     @asyncio.coroutine
     def readchunk(self):
-        return b''
+        return (b'', False)
 
     @asyncio.coroutine
     def readexactly(self, n):

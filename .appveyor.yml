@@ -1,8 +1,6 @@
-version: 2.0-{build}
-
 environment:
   PYPI_PASSWD:
-    secure: syNUF3e8AEPY327rWBkKag==
+    secure: u+K6dKi7+CXXVFEUG4V7zUyV3w7Ntg0Ork/RGVV0eSQ=
   matrix:
     - PYTHON: "C:\\Python34"
     - PYTHON: "C:\\Python34-x64"
@@ -13,17 +11,16 @@ environment:
     - PYTHON: "C:\\Python36-x64"
 
 install:
-  - "build.cmd %PYTHON%\\python.exe -m pip install wheel"
-  - "build.cmd %PYTHON%\\python.exe -m pip install twine"
-  - "build.cmd %PYTHON%\\python.exe -m pip install -r requirements-ci.txt"
+  - "tools/build.cmd %PYTHON%\\python.exe -m pip install -U wheel setuptools"
+  - "tools/build.cmd %PYTHON%\\python.exe -m pip install -r requirements/ci.txt"
 
 build: false
 
 test_script:
-  - "build.cmd %PYTHON%\\python.exe setup.py test"
+  - "tools/build.cmd %PYTHON%\\python.exe setup.py test"
 
 after_test:
-  - "build.cmd %PYTHON%\\python.exe setup.py bdist_wheel"
+  - "tools/build.cmd %PYTHON%\\python.exe setup.py sdist bdist_wheel"
 
 artifacts:
   - path: dist\*
@@ -31,7 +28,7 @@ artifacts:
 deploy_script:
   - ps: >-
       if($env:appveyor_repo_tag -eq 'True') {
-          Invoke-Expression "$env:PYTHON\\python.exe -m twine upload dist/* --username fafhrd --password $env:PYPI_PASSWD"
+          Invoke-Expression "$env:PYTHON\\python.exe -m twine upload dist/* --username andrew.svetlov --password $env:PYPI_PASSWD"
       }
 
 #notifications:

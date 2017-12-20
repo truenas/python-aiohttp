@@ -151,17 +151,6 @@ family are plain shortcuts for :meth:`UrlDispatcher.add_route`.
    Introduce resources.
 
 
-.. _aiohttp-web-custom-resource:
-
-Custom resource implementation
-------------------------------
-
-To register custom resource use :meth:`UrlDispatcher.register_resource`.
-Resource instance must implement `AbstractResource` interface.
-
-.. versionadded:: 1.2.1
-
-
 .. _aiohttp-web-variable-handler:
 
 Variable Resources
@@ -193,7 +182,7 @@ You can also specify a custom regex in the form ``{identifier:regex}``::
 .. note::
 
    Regex should match against *percent encoded* URL
-   (``request.rel_url_raw_path``). E.g. *space character* is encoded
+   (``request.raw_path``). E.g. *space character* is encoded
    as ``%20``.
 
    According to
@@ -331,6 +320,163 @@ viewed using the :meth:`UrlDispatcher.named_resources` method::
    :meth:`UrlDispatcher.resources` instead of
    :meth:`UrlDispatcher.named_routes` / :meth:`UrlDispatcher.routes`.
 
+Alternative ways for registering routes
+---------------------------------------
+
+Code examples shown above use *imperative* style for adding new
+routes: they call ``app.router.add_get(...)`` etc.
+
+There are two alternatives: route tables and route decorators.
+
+Route tables look like Django way::
+
+   async def handle_get(request):
+       ...
+
+
+   async def handle_post(request):
+       ...
+
+   app.router.add_routes([web.get('/get', handle_get),
+                          web.post('/post', handle_post),
+
+
+The snippet calls :meth:`~aiohttp.web.UrlDispather.add_routes` to
+register a list of *route definitions* (:class:`aiohttp.web.RouteDef`
+instances) created by :func:`aiohttp.web.get` or
+:func:`aiohttp.web.post` functions.
+
+.. seealso:: :ref:`aiohttp-web-route-def` reference.
+
+Route decorators are closer to Flask approach::
+
+   routes = web.RouteTableDef()
+
+   @routes.get('/get')
+   async def handle_get(request):
+       ...
+
+
+   @routes.post('/post')
+   async def handle_post(request):
+       ...
+
+   app.router.add_routes(routes)
+
+The example creates a :class:`aiohttp.web.RouteTableDef` container first.
+
+The container is a list-like object with additional decorators
+:meth:`aiohttp.web.RouteTableDef.get`,
+:meth:`aiohttp.web.RouteTableDef.post` etc. for registering new
+routes.
+
+After filling the container
+:meth:`~aiohttp.web.UrlDispather.add_routes` is used for adding
+registered *route definitions* into application's router.
+
+.. seealso:: :ref:`aiohttp-web-route-table-def` reference.
+
+All tree ways (imperative calls, route tables and decorators) are
+equivalent, you could use what do you prefer or even mix them on your
+own.
+
+.. versionadded:: 2.3
+
+Web Handler Cancellation
+------------------------
+
+.. warning::
+
+   :term:`web-handler` execution could be canceled on every ``await``
+   if client drops connection without reading entire response's BODY.
+
+   The behavior is very different from classic WSGI frameworks like
+   Flask and Django.
+
+Sometimes it is a desirable behavior: on processing ``GET`` request the
+code might fetch data from database or other web resource, the
+fetching is potentially slow.
+
+Canceling this fetch is very good: the peer dropped connection
+already, there is no reason to waste time and resources (memory etc) by
+getting data from DB without any chance to send it back to peer.
+
+But sometimes the cancellation is bad: on ``POST`` request very often
+is needed to save data to DB regardless to peer closing.
+
+Cancellation prevention could be implemented in several ways:
+* Applying :func:`asyncio.shield` to coroutine that saves data into DB.
+* Spawning a new task for DB saving
+* Using aiojobs_ or other third party library.
+
+:func:`asyncio.shield` works pretty good. The only disadvantage is you
+need to split web handler into exactly two async functions: one
+for handler itself and other for protected code.
+
+For example the following snippet is not safe::
+
+   async def handler(request):
+       await asyncio.shield(write_to_redis(request))
+       await asyncio.shield(write_to_postgres(request))
+       return web.Response('OK')
+
+Cancellation might be occurred just after saving data in REDIS,
+``write_to_postgres`` will be not called.
+
+Spawning a new task is much worse: there is no place to ``await``
+spawned tasks::
+
+   async def handler(request):
+       request.loop.create_task(write_to_redis(request))
+       return web.Response('OK')
+
+In this case errors from ``write_to_redis`` are not awaited, it leads
+to many asyncio log messages *Future exception was never retrieved*
+and *Task was destroyed but it is pending!*.
+
+Moreover on :ref:`aiohttp-web-graceful-shutdown` phase *aiohttp* don't
+wait for these tasks, you have a great chance to loose very important
+data.
+
+On other hand aiojobs_ provides an API for spawning new jobs and
+awaiting their results etc. It stores all scheduled activity in
+internal data structures and could terminate them gracefully::
+
+   from aiojobs.aiohttp import setup, spawn
+
+   async def coro(timeout):
+       await asyncio.sleep(timeout)  # do something in background
+
+   async def handler(request):
+       await spawn(request, coro())
+       return web.Response()
+
+   app = web.Application()
+   setup(app)
+   app.router.add_get('/', handler)
+
+All not finished jobs will be terminated on
+:attr:`aiohttp.web.Application.on_cleanup` signal.
+
+To prevent cancellation of the whole :term:`web-handler` use
+``@atomic`` decorator::
+
+   from aiojobs.aiohttp import atomic
+
+   @atomic
+   async def handler(request):
+       await write_to_db()
+       return web.Response()
+
+   app = web.Application()
+   setup(app)
+   app.router.add_post('/', handler)
+
+It prevents all ``handler`` async function from cancellation,
+``write_to_db`` will be never interrupted.
+
+.. _aiojobs: http://aiojobs.readthedocs.io/en/latest/
+
 Custom Routing Criteria
 -----------------------
 
@@ -402,6 +548,17 @@ client with ``HTTP/404 Not Found`` by default. To allow the server to follow
 symlinks, parameter ``follow_symlinks`` should be set to ``True``::
 
    app.router.add_static('/prefix', path_to_static_folder, follow_symlinks=True)
+
+When you want to enable cache busting,
+parameter ``append_version`` can be set to ``True``
+
+Cache busting is the process of appending some form of file version hash
+to the filename of resources like JavaScript and CSS files.
+The performance advantage of doing this is that we can tell the browser
+to cache these files indefinitely without worrying about the client not getting
+the latest version when the file changes::
+
+   app.router.add_static('/prefix', path_to_static_folder, append_version=True)
 
 Template Rendering
 ------------------
@@ -482,58 +639,6 @@ third-party library, :mod:`aiohttp_session`, that adds *session* support::
 
     web.run_app(make_app())
 
-
-.. _aiohttp-web-expect-header:
-
-*Expect* Header
----------------
-
-:mod:`aiohttp.web` supports *Expect* header. By default it sends
-``HTTP/1.1 100 Continue`` line to client, or raises
-:exc:`HTTPExpectationFailed` if header value is not equal to
-"100-continue". It is possible to specify custom *Expect* header
-handler on per route basis. This handler gets called if *Expect*
-header exist in request after receiving all headers and before
-processing application's :ref:`aiohttp-web-middlewares` and
-route handler. Handler can return *None*, in that case the request
-processing continues as usual. If handler returns an instance of class
-:class:`StreamResponse`, *request handler* uses it as response. Also
-handler can raise a subclass of :exc:`HTTPException`. In this case all
-further processing will not happen and client will receive appropriate
-http response.
-
-.. note::
-    A server that does not understand or is unable to comply with any of the
-    expectation values in the Expect field of a request MUST respond with
-    appropriate error status. The server MUST respond with a 417
-    (Expectation Failed) status if any of the expectations cannot be met or,
-    if there are other problems with the request, some other 4xx status.
-
-    http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.20
-
-If all checks pass, the custom handler *must* write a *HTTP/1.1 100 Continue*
-status code before returning.
-
-The following example shows how to setup a custom handler for the *Expect*
-header::
-
-   async def check_auth(request):
-       if request.version != aiohttp.HttpVersion11:
-           return
-
-       if request.headers.get('EXPECT') != '100-continue':
-           raise HTTPExpectationFailed(text="Unknown Expect: %s" % expect)
-
-       if request.headers.get('AUTHORIZATION') is None:
-           raise HTTPForbidden()
-
-       request.transport.write(b"HTTP/1.1 100 Continue\r\n\r\n")
-
-   async def hello(request):
-       return web.Response(body=b"Hello, world")
-
-   app = web.Application()
-   app.router.add_get('/', hello, expect_handler=check_auth)
 
 .. _aiohttp-web-forms:
 
@@ -623,14 +728,14 @@ a container for the file as well as some of its metadata::
 
         return web.Response(body=content,
                             headers=MultiDict(
-                                {'CONTENT-DISPOSITION': mp3_file})
+                                {'CONTENT-DISPOSITION': mp3_file}))
 
 
-You might be noticed a big warning in example above. The general issue is that
-:meth:`Request.post` reads whole payload in memory. That's may hurt with
-:abbr:`OOM (Out Of Memory)` error. To avoid this, for multipart uploads, you
-should use :meth:`Request.multipart` which returns :ref:`multipart reader
-<aiohttp-multipart>` back::
+You might have noticed a big warning in the example above. The general issue is
+that :meth:`Request.post` reads the whole payload in memory, resulting in possible
+:abbr:`OOM (Out Of Memory)` errors. To avoid this, for multipart uploads, you
+should use :meth:`Request.multipart` which returns a :ref:`multipart reader
+<aiohttp-multipart>`::
 
     async def store_mp3_handler(request):
 
@@ -684,6 +789,10 @@ with the peer::
         print('websocket connection closed')
 
         return ws
+    
+The handler should be registered as HTTP GET processor::    
+    
+    app.router.add_get('/ws', websocket_handler)    
 
 .. _aiohttp-web-websocket-read-same-task:
 
@@ -881,47 +990,76 @@ Middlewares
 :mod:`aiohttp.web` provides a powerful mechanism for customizing
 :ref:`request handlers<aiohttp-web-handler>` via *middlewares*.
 
-*Middlewares* are setup by providing a sequence of *middleware factories* to
-the keyword-only ``middlewares`` parameter when creating an
-:class:`Application`::
+A *middleware* is a coroutine that can modify either the request or
+response. For example, here's a simple *middleware* which appends
+``' wink'`` to the response::
 
-   app = web.Application(middlewares=[middleware_factory_1,
-                                      middleware_factory_2])
+    from aiohttp.web import middleware
 
-A *middleware factory* is simply a coroutine that implements the logic of a
-*middleware*. For example, here's a trivial *middleware factory*::
+    @middleware
+    async def middleware(request, handler):
+        resp = await handler(request)
+        resp.text = resp.text + ' wink'
+        return resp
 
-    async def middleware_factory(app, handler):
-        async def middleware_handler(request):
-            return await handler(request)
-        return middleware_handler
+(Note: this example won't work with streamed responses or websockets)
 
-Every *middleware factory* should accept two parameters, an
-:class:`app <Application>` instance and a *handler*, and return a new handler.
+Every *middleware* should accept two parameters, a
+:class:`request <Request>` instance and a *handler*, and return the response.
 
-The *handler* passed in to a *middleware factory* is the handler returned by
-the **next** *middleware factory*. The last *middleware factory* always receives
-the :ref:`request handler <aiohttp-web-handler>` selected by the router itself
-(by :meth:`UrlDispatcher.resolve`).
+When creating an :class:`Application`, these *middlewares* are passed to
+the keyword-only ``middlewares`` parameter::
 
-*Middleware factories* should return a new handler that has the same signature
-as a :ref:`request handler <aiohttp-web-handler>`. That is, it should accept a
-single :class:`Request` instance and return a :class:`Response`, or raise an
-exception.
+   app = web.Application(middlewares=[middleware_1,
+                                      middleware_2])
 
 Internally, a single :ref:`request handler <aiohttp-web-handler>` is constructed
 by applying the middleware chain to the original handler in reverse order,
 and is called by the :class:`RequestHandler` as a regular *handler*.
 
-Since *middleware factories* are themselves coroutines, they may perform extra
+Since *middlewares* are themselves coroutines, they may perform extra
 ``await`` calls when creating a new handler, e.g. call database etc.
 
-*Middlewares* usually call the inner handler, but they may choose to ignore it,
+*Middlewares* usually call the handler, but they may choose to ignore it,
 e.g. displaying *403 Forbidden page* or raising :exc:`HTTPForbidden` exception
-if user has no permissions to access the underlying resource.
+if the user does not have permissions to access the underlying resource.
 They may also render errors raised by the handler, perform some pre- or
 post-processing like handling *CORS* and so on.
 
+The following code demonstrates middlewares execution order::
+
+   from aiohttp import web
+
+   def test(request):
+       print('Handler function called')
+       return web.Response(text="Hello")
+
+   @web.middleware
+   async def middleware1(request, handler):
+       print('Middleware 1 called')
+       response = await handler(request)
+       print('Middleware 1 finished')
+       return response
+
+   @web.middleware
+   async def middleware2(request, handler):
+       print('Middleware 2 called')
+       response = await handler(request)
+       print('Middleware 2 finished')
+       return response
+
+
+   app = web.Application(middlewares=[middleware1, middleware2])
+   app.router.add_get('/', test)
+   web.run_app(app)
+
+Produced output::
+
+   Middleware 1 called
+   Middleware 2 called
+   Handler function called
+   Middleware 2 finished
+   Middleware 1 finished
 
 Example
 ^^^^^^^
@@ -938,20 +1076,57 @@ a JSON REST service::
             body=json.dumps({'error': message}).encode('utf-8'),
             content_type='application/json')
 
-    async def error_middleware(app, handler):
-        async def middleware_handler(request):
-            try:
-                response = await handler(request)
-                if response.status == 404:
-                    return json_error(response.message)
-                return response
-            except web.HTTPException as ex:
-                if ex.status == 404:
-                    return json_error(ex.reason)
-                raise
-        return middleware_handler
+    @web.middleware
+    async def error_middleware(request, handler):
+        try:
+            response = await handler(request)
+            if response.status == 404:
+                return json_error(response.message)
+            return response
+        except web.HTTPException as ex:
+            if ex.status == 404:
+                return json_error(ex.reason)
+            raise
 
     app = web.Application(middlewares=[error_middleware])
+
+
+Old Style Middleware
+^^^^^^^^^^^^^^^^^^^^
+
+.. deprecated:: 2.3
+
+   Prior to *v2.3* middleware required an outer *middleware factory*
+   which returned the middleware coroutine. Since *v2.3* this is not
+   required; instead the ``@middleware`` decorator should
+   be used.
+
+Old style middleware (with an outer factory and no ``@middleware``
+decorator) is still supported. Furthermore, old and new style middleware
+can be mixed.
+
+A *middleware factory* is simply a coroutine that implements the logic of a
+*middleware*. For example, here's a trivial *middleware factory*::
+
+    async def middleware_factory(app, handler):
+        async def middleware_handler(request):
+            resp = await handler(request)
+            resp.text = resp.text + ' wink'
+            return resp
+        return middleware_handler
+
+A *middleware factory* should accept two parameters, an
+:class:`app <Application>` instance and a *handler*, and return a new handler.
+
+.. note::
+
+   Both the outer *middleware_factory* coroutine and the inner
+   *middleware_handler* coroutine are called for every request handled.
+
+*Middleware factories* should return a new handler that has the same signature
+as a :ref:`request handler <aiohttp-web-handler>`. That is, it should accept a
+single :class:`Request` instance and return a :class:`Response`, or raise an
+exception.
 
 .. _aiohttp-web-signals:
 
@@ -977,9 +1152,37 @@ This can be accomplished by subscribing to the
     app.on_response_prepare.append(on_prepare)
 
 
+Additionally, the :attr:`~aiohttp.web.Application.on_startup` and
+:attr:`~aiohttp.web.Application.on_cleanup` signals can be subscribed to for
+application component setup and tear down accordingly.
+
+The following example will properly initialize and dispose an aiopg connection
+engine::
+
+    from aiopg.sa import create_engine
+
+    async def create_aiopg(app):
+        app['pg_engine'] = await create_engine(
+            user='postgre',
+            database='postgre',
+            host='localhost',
+            port=5432,
+            password=''
+        )
+
+    async def dispose_aiopg(app):
+        app['pg_engine'].close()
+        await app['pg_engine'].wait_closed()
+
+    app.on_startup.append(create_aiopg)
+    app.on_cleanup.append(dispose_aiopg)
+
+
 Signal handlers should not return a value but may modify incoming mutable
 parameters.
 
+Signal handlers will be run sequentially, in order they were added. If handler
+is asynchronous, it will be awaited before calling next one.
 
 .. warning::
 
@@ -1104,6 +1307,69 @@ handlers work in **CORK** mode.
 To manual mode switch :meth:`~StreamResponse.set_tcp_cork` and
 :meth:`~StreamResponse.set_tcp_nodelay` methods can be used.  It may
 be helpful for better streaming control for example.
+
+
+.. _aiohttp-web-expect-header:
+
+*Expect* Header
+---------------
+
+:mod:`aiohttp.web` supports *Expect* header. By default it sends
+``HTTP/1.1 100 Continue`` line to client, or raises
+:exc:`HTTPExpectationFailed` if header value is not equal to
+"100-continue". It is possible to specify custom *Expect* header
+handler on per route basis. This handler gets called if *Expect*
+header exist in request after receiving all headers and before
+processing application's :ref:`aiohttp-web-middlewares` and
+route handler. Handler can return *None*, in that case the request
+processing continues as usual. If handler returns an instance of class
+:class:`StreamResponse`, *request handler* uses it as response. Also
+handler can raise a subclass of :exc:`HTTPException`. In this case all
+further processing will not happen and client will receive appropriate
+http response.
+
+.. note::
+    A server that does not understand or is unable to comply with any of the
+    expectation values in the Expect field of a request MUST respond with
+    appropriate error status. The server MUST respond with a 417
+    (Expectation Failed) status if any of the expectations cannot be met or,
+    if there are other problems with the request, some other 4xx status.
+
+    http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.20
+
+If all checks pass, the custom handler *must* write a *HTTP/1.1 100 Continue*
+status code before returning.
+
+The following example shows how to setup a custom handler for the *Expect*
+header::
+
+   async def check_auth(request):
+       if request.version != aiohttp.HttpVersion11:
+           return
+
+       if request.headers.get('EXPECT') != '100-continue':
+           raise HTTPExpectationFailed(text="Unknown Expect: %s" % expect)
+
+       if request.headers.get('AUTHORIZATION') is None:
+           raise HTTPForbidden()
+
+       request.transport.write(b"HTTP/1.1 100 Continue\r\n\r\n")
+
+   async def hello(request):
+       return web.Response(body=b"Hello, world")
+
+   app = web.Application()
+   app.router.add_get('/', hello, expect_handler=check_auth)
+
+.. _aiohttp-web-custom-resource:
+
+Custom resource implementation
+------------------------------
+
+To register custom resource use :meth:`UrlDispatcher.register_resource`.
+Resource instance must implement `AbstractResource` interface.
+
+.. versionadded:: 1.2.1
 
 
 .. _aiohttp-web-graceful-shutdown:
@@ -1258,6 +1524,37 @@ Pages like *404 Not Found* and *500 Internal Error* could be handled
 by custom middleware, see :ref:`aiohttp-tutorial-middlewares` for
 details.
 
+.. _aiohttp-web-forwarded-support:
+
+Deploying behind a Proxy
+------------------------
+
+As discussed in :ref:`aiohttp-deployment` the preferable way is
+deploying *aiohttp* web server behind a *Reverse Proxy Server* like
+:term:`nginx` for production usage.
+
+In this way properties like :attr:`~BaseRequest.scheme`
+:attr:`~BaseRequest.host` and :attr:`~BaseRequest.remote` are
+incorrect.
+
+Real values should be given from proxy server, usually either
+``Forwarded`` or old-fashion ``X-Forwarded-For``,
+``X-Forwarded-Host``, ``X-Forwarded-Proto`` HTTP headers are used.
+
+*aiohttp* does not take *forwarded* headers into account by default
+because it produces *security issue*: HTTP client might add these
+headers too, pushing non-trusted data values.
+
+That's why *aiohttp server* should setup *forwarded* headers in custom
+middleware in tight conjunction with *reverse proxy configuration*.
+
+For changing :attr:`~BaseRequest.scheme` :attr:`~BaseRequest.host` and
+:attr:`~BaseRequest.remote` the middleware might use
+:meth:`~BaseRequest.clone`.
+
+TBD: add a link to third-party project with proper middleware
+implementation.
+
 Swagger support
 ---------------
 
@@ -1324,7 +1621,3 @@ Documentation and a complete tutorial of creating and running an app
 locally are available at aiohttp-devtools_.
 
 .. _aiohttp-devtools: https://github.com/aio-libs/aiohttp-devtools
-
-
-.. disqus::
-  :title: aiohttp server usage

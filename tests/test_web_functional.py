@@ -694,14 +694,16 @@ def test_empty_content_for_query_without_body(loop, test_client):
 
     @asyncio.coroutine
     def handler(request):
+        assert not request.body_exists
+        assert not request.can_read_body
         assert not request.has_body
         return web.Response()
 
     app = web.Application()
-    app.router.add_get('/', handler)
+    app.router.add_post('/', handler)
     client = yield from test_client(app)
 
-    resp = yield from client.get('/')
+    resp = yield from client.post('/')
     assert 200 == resp.status
 
 
@@ -710,6 +712,8 @@ def test_empty_content_for_query_with_body(loop, test_client):
 
     @asyncio.coroutine
     def handler(request):
+        assert request.body_exists
+        assert request.can_read_body
         assert request.has_body
         body = yield from request.read()
         return web.Response(body=body)
@@ -763,12 +767,12 @@ def test_large_header_allowed(loop, test_client, test_server):
         return web.Response()
 
     app = web.Application()
-    app.router.add_get('/', handler)
+    app.router.add_post('/', handler)
     server = yield from test_server(app, max_field_size=81920)
     client = yield from test_client(server)
 
     headers = {'Long-Header': 'ab' * 8129}
-    resp = yield from client.get('/', headers=headers)
+    resp = yield from client.post('/', headers=headers)
     assert 200 == resp.status
 
 
@@ -993,7 +997,7 @@ def test_bad_request_payload(loop, test_client):
 
     @asyncio.coroutine
     def handler(request):
-        assert request.method == 'GET'
+        assert request.method == 'POST'
 
         with pytest.raises(aiohttp.web.RequestPayloadError):
             yield from request.content.read()
@@ -1001,10 +1005,10 @@ def test_bad_request_payload(loop, test_client):
         return web.Response()
 
     app = web.Application()
-    app.router.add_get('/', handler)
+    app.router.add_post('/', handler)
     client = yield from test_client(app)
 
-    resp = yield from client.get(
+    resp = yield from client.post(
         '/', data=b'test', headers={'content-encoding': 'gzip'})
     assert 200 == resp.status
 
@@ -1397,6 +1401,58 @@ def test_subapp_on_cleanup(loop, test_server):
     assert [app, subapp1, subapp2] == order
 
 
+@pytest.mark.parametrize('route,expected,middlewares', [
+    ('/sub/', ['A: root', 'C: sub', 'D: sub'], 'AC'),
+    ('/', ['A: root', 'B: root'], 'AC'),
+    ('/sub/', ['A: root', 'D: sub'], 'A'),
+    ('/', ['A: root', 'B: root'], 'A'),
+    ('/sub/', ['C: sub', 'D: sub'], 'C'),
+    ('/', ['B: root'], 'C'),
+    ('/sub/', ['D: sub'], ''),
+    ('/', ['B: root'], ''),
+])
+@asyncio.coroutine
+def test_subapp_middleware_context(loop, test_client, route, expected,
+                                   middlewares):
+    values = []
+
+    def show_app_context(appname):
+        @web.middleware
+        @asyncio.coroutine
+        def middleware(request, handler):
+            values.append('{}: {}'.format(
+                appname, request.app['my_value']))
+            return (yield from handler(request))
+        return middleware
+
+    def make_handler(appname):
+        @asyncio.coroutine
+        def handler(request):
+            values.append('{}: {}'.format(
+                appname, request.app['my_value']))
+            return web.Response(text='Ok')
+        return handler
+
+    app = web.Application()
+    app['my_value'] = 'root'
+    if 'A' in middlewares:
+        app.middlewares.append(show_app_context('A'))
+    app.router.add_get('/', make_handler('B'))
+
+    subapp = web.Application()
+    subapp['my_value'] = 'sub'
+    if 'C' in middlewares:
+        subapp.middlewares.append(show_app_context('C'))
+    subapp.router.add_get('/', make_handler('D'))
+    app.add_subapp('/sub/', subapp)
+
+    client = yield from test_client(app)
+    resp = yield from client.get(route)
+    assert 200 == resp.status
+    assert 'Ok' == (yield from resp.text())
+    assert expected == values
+
+
 @asyncio.coroutine
 def test_custom_date_header(loop, test_client):
 
@@ -1566,3 +1622,21 @@ def test_response_with_bodypart(loop, test_client):
         resp.headers['content-disposition'])
     assert disp == ('attachment',
                     {'name': 'file', 'filename': 'file', 'filename*': 'file'})
+
+
+@asyncio.coroutine
+def test_request_clone(loop, test_client):
+
+    @asyncio.coroutine
+    def handler(request):
+        r2 = request.clone(method='POST')
+        assert r2.method == 'POST'
+        assert r2.match_info is request.match_info
+        return web.Response()
+
+    app = web.Application()
+    app.router.add_get('/', handler)
+    client = yield from test_client(app)
+
+    resp = yield from client.get('/')
+    assert 200 == resp.status
