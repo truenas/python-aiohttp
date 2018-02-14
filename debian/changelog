@@ -6,6 +6,7 @@ python-aiohttp (3.0.1-1) unstable; urgency=medium
   [ Piotr Ożarowski ]
   * New upstream release
     - minimum required Python 3 version bumped to 3.5.3
+  * bundle idna_ssl module until Python 3.7 is the one supported in Debian
 
  -- Piotr Ożarowski <piotr@debian.org>  Wed, 14 Feb 2018 12:59:09 +0100
 
