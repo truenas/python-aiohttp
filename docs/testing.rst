@@ -8,7 +8,7 @@ Testing
 Testing aiohttp web servers
 ---------------------------
 
-aiohttp provides plugin for pytest_ making writing web server tests
+aiohttp provides plugin for *pytest* making writing web server tests
 extremely easy, it also provides :ref:`test framework agnostic
 utilities <aiohttp-testing-framework-agnostic-utilities>` for testing
 with other frameworks such as :ref:`unittest
@@ -71,7 +71,7 @@ proxy methods to the client for common operations such as
 Pytest
 ~~~~~~
 
-The :data:`test_client` fixture available from pytest-aiohttp_ plugin
+The :data:`aiohttp_client` fixture available from pytest-aiohttp_ plugin
 allows you to create a client to make requests to test your app.
 
 A simple would be::
@@ -81,10 +81,10 @@ A simple would be::
     async def hello(request):
         return web.Response(text='Hello, world')
 
-    async def test_hello(test_client, loop):
+    async def test_hello(aiohttp_client, loop):
         app = web.Application()
         app.router.add_get('/', hello)
-        client = await test_client(app)
+        client = await aiohttp_client(app)
         resp = await client.get('/')
         assert resp.status == 200
         text = await resp.text()
@@ -107,11 +107,11 @@ app test client::
             body='value: {}'.format(request.app['value']).encode('utf-8'))
 
     @pytest.fixture
-    def cli(loop, test_client):
+    def cli(loop, aiohttp_client):
         app = web.Application()
         app.router.add_get('/', previous)
         app.router.add_post('/', previous)
-        return loop.run_until_complete(test_client(app))
+        return loop.run_until_complete(aiohttp_client(app))
 
     async def test_set_value(cli):
         resp = await cli.post('/', data={'value': 'foo'})
@@ -128,38 +128,47 @@ app test client::
 
 Pytest tooling has the following fixtures:
 
-.. data:: test_server(app, **kwargs)
+.. data:: aiohttp_server(app, *, port=None, **kwargs)
 
    A fixture factory that creates
    :class:`~aiohttp.test_utils.TestServer`::
 
-      async def test_f(test_server):
+      async def test_f(aiohttp_server):
           app = web.Application()
           # fill route table
 
-          server = await test_server(app)
+          server = await aiohttp_server(app)
 
    The server will be destroyed on exit from test function.
 
    *app* is the :class:`aiohttp.web.Application` used
                            to start server.
 
+   *port* optional, port the server is run at, if
+   not provided a random unused port is used.
+
+   .. versionadded:: 3.0
+
    *kwargs* are parameters passed to
                   :meth:`aiohttp.web.Application.make_handler`
 
+   .. versionchanged:: 3.0
 
-.. data:: test_client(app, **kwargs)
-          test_client(server, **kwargs)
-          test_client(raw_server, **kwargs)
+      The fixture was renamed from ``test_server`` to ``aiohttp_server``.
+
+
+.. data:: aiohttp_client(app, server_kwargs=None, **kwargs)
+          aiohttp_client(server, **kwargs)
+          aiohttp_client(raw_server, **kwargs)
 
    A fixture factory that creates
    :class:`~aiohttp.test_utils.TestClient` for access to tested server::
 
-      async def test_f(test_client):
+      async def test_f(aiohttp_client):
           app = web.Application()
           # fill route table
 
-          client = await test_client(app)
+          client = await aiohttp_client(app)
           resp = await client.get('/')
 
    *client* and responses are cleaned up after test function finishing.
@@ -168,26 +177,55 @@ Pytest tooling has the following fixtures:
    :class:`aiohttp.test_utils.TestServer` or
    :class:`aiohttp.test_utils.RawTestServer` instance.
 
+   *server_kwargs* are parameters passed to the test server if an app
+   is passed, else ignored.
+
    *kwargs* are parameters passed to
    :class:`aiohttp.test_utils.TestClient` constructor.
 
-.. data:: raw_test_server(handler, **kwargs)
+   .. versionchanged:: 3.0
+
+      The fixture was renamed from ``test_client`` to ``aiohttp_client``.
+
+.. data:: aiohttp_raw_server(handler, *, port=None, **kwargs)
 
    A fixture factory that creates
    :class:`~aiohttp.test_utils.RawTestServer` instance from given web
-   handler.
+   handler.::
 
-   *handler* should be a coroutine which accepts a request and returns
-   response, e.g.::
-
-      async def test_f(raw_test_server, test_client):
+      async def test_f(aiohttp_raw_server, aiohttp_client):
 
           async def handler(request):
               return web.Response(text="OK")
 
-          raw_server = await raw_test_server(handler)
-          client = await test_client(raw_server)
+          raw_server = await aiohttp_raw_server(handler)
+          client = await aiohttp_client(raw_server)
           resp = await client.get('/')
+
+   *handler* should be a coroutine which accepts a request and returns
+   response, e.g.
+
+   *port* optional, port the server is run at, if
+   not provided a random unused port is used.
+
+   .. versionadded:: 3.0
+
+.. data:: aiohttp_unused_port()
+
+   Function to return an unused port number for IPv4 TCP protocol::
+
+      async def test_f(aiohttp_client, aiohttp_unused_port):
+          port = aiohttp_unused_port()
+          app = web.Application()
+          # fill route table
+
+          client = await aiohttp_client(app, server_kwargs={'port': port})
+          ...
+
+   .. versionchanged:: 3.0
+
+      The fixture was renamed from ``unused_port`` to ``aiohttp_unused_port``.
+
 
 .. _aiohttp-testing-unittest-example:
 
@@ -208,7 +246,12 @@ functionality, the AioHTTPTestCase is provided::
             """
             Override the get_app method to return your application.
             """
-            return web.Application()
+            async def hello(request):
+                return web.Response(text='Hello, world')
+
+            app = web.Application()
+            app.router.add_get('/', hello)
+            return app
 
         # the unittest_run_loop decorator can be used in tandem with
         # the AioHTTPTestCase to simplify running
@@ -221,10 +264,10 @@ functionality, the AioHTTPTestCase is provided::
             assert "Hello, world" in text
 
         # a vanilla example
-        def test_example(self):
+        def test_example_vanilla(self):
             async def test_get_route():
-                url = root + "/"
-                resp = await self.client.request("GET", url, loop=loop)
+                url = "/"
+                resp = await self.client.request("GET", url)
                 assert resp.status == 200
                 text = await resp.text()
                 assert "Hello, world" in text
@@ -247,7 +290,7 @@ functionality, the AioHTTPTestCase is provided::
 
        an aiohttp test server, :class:`TestServer` instance.
 
-       .. versionadded:: 2.3.0
+       .. versionadded:: 2.3
 
     .. attribute:: loop
 
@@ -265,7 +308,7 @@ functionality, the AioHTTPTestCase is provided::
 
        :return: :class:`TestClient` instance.
 
-       .. versionadded:: 2.3.0
+       .. versionadded:: 2.3
 
     .. comethod:: get_server()
 
@@ -274,7 +317,7 @@ functionality, the AioHTTPTestCase is provided::
 
        :return: :class:`TestServer` instance.
 
-       .. versionadded:: 2.3.0
+       .. versionadded:: 2.3
 
     .. comethod:: get_application()
 
@@ -289,14 +332,14 @@ functionality, the AioHTTPTestCase is provided::
        This async method do nothing by default and can be overridden to execute
        asynchronous code during the ``setUp`` stage of the ``TestCase``.
 
-       .. versionadded:: 2.3.0
+       .. versionadded:: 2.3
 
     .. comethod:: tearDownAsync()
 
        This async method do nothing by default and can be overridden to execute
        asynchronous code during the ``tearDown`` stage of the ``TestCase``.
 
-       .. versionadded:: 2.3.0
+       .. versionadded:: 2.3
 
     .. method:: setUp()
 
@@ -563,7 +606,7 @@ Test server usually works in conjunction with
 :class:`aiohttp.test_utils.TestClient` which provides handy client methods
 for accessing to the server.
 
-.. class:: BaseTestServer(*, scheme='http', host='127.0.0.1')
+.. class:: BaseTestServer(*, scheme='http', host='127.0.0.1', port=None)
 
    Base class for test servers.
 
@@ -572,6 +615,10 @@ for accessing to the server.
    :param str host: a host for TCP socket, IPv4 *local host*
       (``'127.0.0.1'``) by default.
 
+   :param int port: optional port for TCP socket, if not provided a
+      random unused port is used.
+
+      .. versionadded:: 3.0
 
    .. attribute:: scheme
 
@@ -584,7 +631,7 @@ for accessing to the server.
 
    .. attribute:: port
 
-      A random *port* used to start a server.
+      *port* used to start the test server.
 
    .. attribute:: handler
 
@@ -630,6 +677,11 @@ for accessing to the server.
    :param str host: a host for TCP socket, IPv4 *local host*
       (``'127.0.0.1'``) by default.
 
+   :param int port: optional port for TCP socket, if not provided a
+      random unused port is used.
+
+      .. versionadded:: 3.0
+
 
 .. class:: TestServer(app, *, scheme="http", host='127.0.0.1')
 
@@ -643,6 +695,10 @@ for accessing to the server.
    :param str host: a host for TCP socket, IPv4 *local host*
       (``'127.0.0.1'``) by default.
 
+   :param int port: optional port for TCP socket, if not provided a
+      random unused port is used.
+
+      .. versionadded:: 3.0
 
    .. attribute:: app
 
@@ -688,7 +744,7 @@ Test Client
 
    .. attribute:: port
 
-      A random *port* used to start a server.
+      *port* used to start the server
 
    .. attribute:: server
 

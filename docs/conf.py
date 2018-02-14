@@ -13,10 +13,10 @@
 # All configuration values have a default; values that are commented out
 # serve to show the default.
 
-import sys
-import os
 import codecs
+import os
 import re
+import sys
 
 _docs_path = os.path.dirname(__file__)
 _version_path = os.path.abspath(os.path.join(_docs_path,
@@ -39,7 +39,6 @@ with codecs.open(_version_path, 'r', 'latin1') as fp:
 sys.path.insert(0, os.path.abspath('..'))
 sys.path.insert(0, os.path.abspath('.'))
 
-# import alabaster
 
 # -- General configuration ------------------------------------------------
 
@@ -53,7 +52,6 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.viewcode',
     'sphinx.ext.intersphinx',
-    'alabaster',
     'sphinxcontrib.asyncio',
 ]
 
@@ -73,6 +71,8 @@ intersphinx_mapping = {
         ('https://yarl.readthedocs.io/en/stable/', None),
     'aiohttpjinja2':
         ('https://aiohttp-jinja2.readthedocs.io/en/stable/', None),
+    'aiohttpremotes':
+        ('https://aiohttp-remotes.readthedocs.io/en/stable/', None),
     'aiohttpsession':
         ('https://aiohttp-session.readthedocs.io/en/stable/', None)}
 
@@ -86,11 +86,11 @@ source_suffix = '.rst'
 # source_encoding = 'utf-8-sig'
 
 # The master toctree document.
-master_doc = 'toc'
+master_doc = 'index'
 
 # General information about the project.
 project = 'aiohttp'
-copyright = '2013-2017, Aiohttp contributors'
+copyright = '2013-2018, Aiohttp contributors'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -131,7 +131,7 @@ exclude_patterns = ['_build']
 # show_authors = False
 
 # The name of the Pygments (syntax highlighting) style to use.
-pygments_style = 'sphinx'
+# pygments_style = 'sphinx'
 
 # The default language to highlight source code in.
 highlight_language = 'python3'
@@ -147,28 +147,36 @@ highlight_language = 'python3'
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
-html_theme = 'alabaster'
+html_theme = 'aiohttp_theme'
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
 html_theme_options = {
     'logo': 'aiohttp-icon-128x128.png',
-    'description': 'http client/server for asyncio',
+    'description': 'Async HTTP client/server for asyncio and Python',
     'canonical_url': 'http://docs.aiohttp.org/en/stable/',
     'github_user': 'aio-libs',
     'github_repo': 'aiohttp',
     'github_button': True,
     'github_type': 'star',
     'github_banner': True,
-    'travis_button': True,
-    'codecov_button': True,
-    'pre_bg': '#FFF6E5',
-    'note_bg': '#E5ECD1',
-    'note_border': '#BFCF8C',
-    'body_text': '#482C0A',
-    'sidebar_text': '#49443E',
-    'sidebar_header': '#4B4032',
+    'badges': [{'image': 'https://secure.travis-ci.org/aio-libs/aiohttp.svg?branch=master',
+                'target': 'https://travis-ci.org/aio-libs/aiohttp',
+                'height': '20',
+                'alt': 'Travis CI status'},
+               {'image': 'https://codecov.io/github/aio-libs/aiohttp/coverage.svg?branch=master',
+               'target': 'https://codecov.io/github/aio-libs/aiohttp',
+                'height': '20',
+                'alt': 'Code coverage status'},
+               {'image': 'https://badge.fury.io/py/aiohttp.svg',
+               'target': 'https://badge.fury.io/py/aiohttp',
+                'height': '20',
+                'alt': 'Latest PyPI package version'},
+               {'image': 'https://badges.gitter.im/Join%20Chat.svg',
+                'target': 'https://gitter.im/aio-libs/Lobby',
+                'height': '20',
+                'alt': 'Chat on Gitter'}],
 }
 
 # Add any paths that contain custom themes here, relative to this directory.
@@ -188,7 +196,7 @@ html_theme_options = {
 # The name of an image file (within the static path) to use as favicon of the
 # docs.  This file should be a Windows icon file (.ico) being 16x16 or 32x32
 # pixels large.
-html_favicon = 'aiohttp-icon.ico'
+html_favicon = 'favicon.ico'
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,

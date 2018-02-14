@@ -1,6 +1,7 @@
 import asyncio
 import collections
 import datetime
+import io
 import json
 import re
 import socket
@@ -9,22 +10,31 @@ import tempfile
 import types
 import warnings
 from email.utils import parsedate
+from http.cookies import SimpleCookie
 from types import MappingProxyType
 from urllib.parse import parse_qsl
 
-from multidict import CIMultiDict, MultiDict, MultiDictProxy
+import attr
+from multidict import CIMultiDict, CIMultiDictProxy, MultiDict, MultiDictProxy
 from yarl import URL
 
 from . import hdrs, multipart
-from .helpers import HeadersMixin, SimpleCookie, reify, sentinel
+from .helpers import HeadersMixin, reify, sentinel
 from .streams import EmptyStreamReader
 from .web_exceptions import HTTPRequestEntityTooLarge
 
 
 __all__ = ('BaseRequest', 'FileField', 'Request')
 
-FileField = collections.namedtuple(
-    'Field', 'name filename file content_type headers')
+
+@attr.s(frozen=True, slots=True)
+class FileField:
+    name = attr.ib(type=str)
+    filename = attr.ib(type=str)
+    file = attr.ib(type=io.BufferedReader)
+    content_type = attr.ib(type=str)
+    headers = attr.ib(type=CIMultiDictProxy)
+
 
 _TCHAR = string.digits + string.ascii_letters + r"!#$%&'*+.^_`|~-"
 # '-' at the end to prevent interpretation as range in a char class
@@ -61,7 +71,12 @@ class BaseRequest(collections.MutableMapping, HeadersMixin):
     POST_METHODS = {hdrs.METH_PATCH, hdrs.METH_POST, hdrs.METH_PUT,
                     hdrs.METH_TRACE, hdrs.METH_DELETE}
 
-    def __init__(self, message, payload, protocol, writer, task,
+    ATTRS = HeadersMixin.ATTRS | frozenset([
+        '_message', '_protocol', '_payload_writer', '_payload', '_headers',
+        '_method', '_version', '_rel_url', '_post', '_read_bytes',
+        '_state', '_cache', '_task', '_client_max_size', '_loop'])
+
+    def __init__(self, message, payload, protocol, payload_writer, task,
                  loop,
                  *, client_max_size=1024**2,
                  state=None,
@@ -70,8 +85,7 @@ class BaseRequest(collections.MutableMapping, HeadersMixin):
             state = {}
         self._message = message
         self._protocol = protocol
-        self._transport = protocol.transport
-        self._writer = writer
+        self._payload_writer = payload_writer
 
         self._payload = payload
         self._headers = message.headers
@@ -87,9 +101,12 @@ class BaseRequest(collections.MutableMapping, HeadersMixin):
         self._client_max_size = client_max_size
         self._loop = loop
 
-        self._scheme = scheme
-        self._host = host
-        self._remote = remote
+        if scheme is not None:
+            self._cache['scheme'] = scheme
+        if host is not None:
+            self._cache['host'] = host
+        if remote is not None:
+            self._cache['remote'] = remote
 
     def clone(self, *, method=sentinel, rel_url=sentinel,
               headers=sentinel, scheme=sentinel, host=sentinel,
@@ -132,7 +149,7 @@ class BaseRequest(collections.MutableMapping, HeadersMixin):
             message,
             self._payload,
             self._protocol,
-            self._writer,
+            self._payload_writer,
             self._task,
             self._loop,
             client_max_size=self._client_max_size,
@@ -149,11 +166,13 @@ class BaseRequest(collections.MutableMapping, HeadersMixin):
 
     @property
     def transport(self):
+        if self._protocol is None:
+            return None
         return self._protocol.transport
 
     @property
     def writer(self):
-        return self._writer
+        return self._payload_writer
 
     @property
     def message(self):
@@ -255,12 +274,14 @@ class BaseRequest(collections.MutableMapping, HeadersMixin):
     def scheme(self):
         """A string representing the scheme of the request.
 
+        Hostname is resolved in this order:
+
+        - overridden value by .clone(scheme=new_scheme) call.
+        - type of connection to peer: HTTPS if socket is SSL, HTTP otherwise.
+
         'http' or 'https'.
         """
-        scheme = self._scheme
-        if scheme is not None:
-            return scheme
-        if self._transport.get_extra_info('sslcontext'):
+        if self.transport.get_extra_info('sslcontext'):
             return 'https'
         else:
             return 'http'
@@ -285,17 +306,12 @@ class BaseRequest(collections.MutableMapping, HeadersMixin):
     def host(self):
         """Hostname of the request.
 
-        Hostname is resolved through the following headers, in this order:
+        Hostname is resolved in this order:
 
-        - Forwarded
-        - X-Forwarded-Host
-        - Host
-
-        Returns str, or None if no hostname is found in the headers.
+        - overridden value by .clone(host=new_host) call.
+        - HOST HTTP header
+        - socket.getfqdn() value
         """
-        host = self._host
-        if host is not None:
-            return host
         host = self._message.headers.get(hdrs.HOST)
         if host is not None:
             return host
@@ -306,17 +322,14 @@ class BaseRequest(collections.MutableMapping, HeadersMixin):
     def remote(self):
         """Remote IP of client initiated HTTP request.
 
-        The IP is resolved through the following headers, in this order:
+        The IP is resolved in this order:
 
-        - Forwarded
-        - X-Forwarded-For
+        - overridden value by .clone(remote=new_remote) call.
         - peername of opened socket
         """
-        remote = self._remote
-        if remote is not None:
-            return remote
-        transport = self._transport
-        peername = transport.get_extra_info('peername')
+        if self.transport is None:
+            return None
+        peername = self.transport.get_extra_info('peername')
         if isinstance(peername, (list, tuple)):
             return peername[0]
         else:
@@ -355,13 +368,6 @@ class BaseRequest(collections.MutableMapping, HeadersMixin):
     @property
     def query(self):
         """A multidict with all the variables in the query string."""
-        return self._rel_url.query
-
-    @property
-    def GET(self):
-        """A multidict with all the variables in the query string."""
-        warnings.warn("GET property is deprecated, use .query instead",
-                      DeprecationWarning)
         return self._rel_url.query
 
     @property
@@ -469,17 +475,15 @@ class BaseRequest(collections.MutableMapping, HeadersMixin):
         """Return True if request has HTTP BODY, False otherwise."""
         return type(self._payload) is not EmptyStreamReader
 
-    @asyncio.coroutine
-    def release(self):
+    async def release(self):
         """Release request.
 
         Eat unread part of HTTP BODY if present.
         """
         while not self._payload.at_eof():
-            yield from self._payload.readany()
+            await self._payload.readany()
 
-    @asyncio.coroutine
-    def read(self):
+    async def read(self):
         """Read request body if present.
 
         Returns bytes object with full request content.
@@ -487,7 +491,7 @@ class BaseRequest(collections.MutableMapping, HeadersMixin):
         if self._read_bytes is None:
             body = bytearray()
             while True:
-                chunk = yield from self._payload.readany()
+                chunk = await self._payload.readany()
                 body.extend(chunk)
                 if self._client_max_size \
                         and len(body) >= self._client_max_size:
@@ -497,26 +501,22 @@ class BaseRequest(collections.MutableMapping, HeadersMixin):
             self._read_bytes = bytes(body)
         return self._read_bytes
 
-    @asyncio.coroutine
-    def text(self):
+    async def text(self):
         """Return BODY as text using encoding from .charset."""
-        bytes_body = yield from self.read()
+        bytes_body = await self.read()
         encoding = self.charset or 'utf-8'
         return bytes_body.decode(encoding)
 
-    @asyncio.coroutine
-    def json(self, *, loads=json.loads):
+    async def json(self, *, loads=json.loads):
         """Return BODY as JSON."""
-        body = yield from self.text()
+        body = await self.text()
         return loads(body)
 
-    @asyncio.coroutine
-    def multipart(self, *, reader=multipart.MultipartReader):
+    async def multipart(self, *, reader=multipart.MultipartReader):
         """Return async iterator to process BODY as multipart."""
         return reader(self._headers, self._payload)
 
-    @asyncio.coroutine
-    def post(self):
+    async def post(self):
         """Return POST parameters."""
         if self._post is not None:
             return self._post
@@ -534,9 +534,9 @@ class BaseRequest(collections.MutableMapping, HeadersMixin):
         out = MultiDict()
 
         if content_type == 'multipart/form-data':
-            multipart = yield from self.multipart()
+            multipart = await self.multipart()
 
-            field = yield from multipart.next()
+            field = await multipart.next()
             while field is not None:
                 size = 0
                 max_size = self._client_max_size
@@ -545,35 +545,35 @@ class BaseRequest(collections.MutableMapping, HeadersMixin):
                 if field.filename:
                     # store file in temp file
                     tmp = tempfile.TemporaryFile()
-                    chunk = yield from field.read_chunk(size=2**16)
+                    chunk = await field.read_chunk(size=2**16)
                     while chunk:
                         chunk = field.decode(chunk)
                         tmp.write(chunk)
                         size += len(chunk)
-                        if max_size > 0 and size > max_size:
+                        if 0 < max_size < size:
                             raise ValueError(
                                 'Maximum request body size exceeded')
-                        chunk = yield from field.read_chunk(size=2**16)
+                        chunk = await field.read_chunk(size=2**16)
                     tmp.seek(0)
 
                     ff = FileField(field.name, field.filename,
                                    tmp, content_type, field.headers)
                     out.add(field.name, ff)
                 else:
-                    value = yield from field.read(decode=True)
+                    value = await field.read(decode=True)
                     if content_type is None or \
                             content_type.startswith('text/'):
                         charset = field.get_charset(default='utf-8')
                         value = value.decode(charset)
                     out.add(field.name, value)
                     size += len(value)
-                    if max_size > 0 and size > max_size:
+                    if 0 < max_size < size:
                         raise ValueError(
                             'Maximum request body size exceeded')
 
-                field = yield from multipart.next()
+                field = await multipart.next()
         else:
-            data = yield from self.read()
+            data = await self.read()
             if data:
                 charset = self.charset or 'utf-8'
                 out.extend(
@@ -599,12 +599,23 @@ class BaseRequest(collections.MutableMapping, HeadersMixin):
 
 class Request(BaseRequest):
 
+    ATTRS = BaseRequest.ATTRS | frozenset(['_match_info'])
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         # matchdict, route_name, handler
         # or information about traversal lookup
         self._match_info = None  # initialized after route resolving
+
+    def __setattr__(self, name, val):
+        if name not in self.ATTRS:
+            warnings.warn("Setting custom {}.{} attribute "
+                          "is discouraged".format(self.__class__.__name__,
+                                                  name),
+                          DeprecationWarning,
+                          stacklevel=2)
+        super().__setattr__(name, val)
 
     def clone(self, *, method=sentinel, rel_url=sentinel,
               headers=sentinel, scheme=sentinel, host=sentinel,
@@ -628,10 +639,9 @@ class Request(BaseRequest):
         """Application instance."""
         return self._match_info.current_app
 
-    @asyncio.coroutine
-    def _prepare_hook(self, response):
+    async def _prepare_hook(self, response):
         match_info = self._match_info
         if match_info is None:
             return
         for app in match_info.apps:
-            yield from app.on_response_prepare.send(self, response)
+            await app.on_response_prepare.send(self, response)
