@@ -1,0 +1,42 @@
+From 09f050f18e69605a09f638a45e6738e7daa60cdd Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Piotr=20O=C5=BCarowski?= <piotr@debian.org>
+Date: Wed, 14 Feb 2018 13:55:21 +0100
+Subject: bundle idna_ssl
+
+yeah, usually we do that the other way around ;)
+
+this is just a temporary fix and hopefully will not be released with
+Debian stable
+---
+ aiohttp/helpers.py | 2 +-
+ setup.py           | 4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/aiohttp/helpers.py b/aiohttp/helpers.py
+index 66cab71..5c44bae 100644
+--- a/aiohttp/helpers.py
++++ b/aiohttp/helpers.py
+@@ -35,7 +35,7 @@ __all__ = ('BasicAuth',)
+ PY_36 = sys.version_info >= (3, 6)
+ 
+ if sys.version_info < (3, 7):
+-    import idna_ssl
++    from aiohttp import idna_ssl
+     idna_ssl.patch_match_hostname()
+ 
+ 
+diff --git a/setup.py b/setup.py
+index 82ff542..da844df 100644
+--- a/setup.py
++++ b/setup.py
+@@ -69,8 +69,8 @@ install_requires = ['attrs>=17.4.0', 'chardet>=2.0,<4.0',
+                     'async_timeout>=1.2,<3.0',
+                     'yarl>=1.0,<2.0']
+ 
+-if sys.version_info < (3, 7):
+-    install_requires.append('idna-ssl>=1.0')
++#if sys.version_info < (3, 7):
++#    install_requires.append('idna-ssl>=1.0')
+ 
+ 
+ def read(f):
