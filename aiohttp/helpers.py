@@ -35,7 +35,7 @@ __all__ = ('BasicAuth',)
 PY_36 = sys.version_info >= (3, 6)
 
 if sys.version_info < (3, 7):
-    import idna_ssl
+    from aiohttp import idna_ssl
     idna_ssl.patch_match_hostname()
 
 
