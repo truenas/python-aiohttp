@@ -7,19 +7,22 @@ import cgi
 import datetime
 import functools
 import inspect
+import netrc
 import os
 import re
 import sys
 import time
-import warnings
 import weakref
 from collections import namedtuple
+from contextlib import suppress
 from math import ceil
 from pathlib import Path
 from urllib.parse import quote
 from urllib.request import getproxies
 
-from async_timeout import timeout
+import async_timeout
+import attr
+from multidict import MultiDict
 from yarl import URL
 
 from . import hdrs
@@ -27,26 +30,16 @@ from .abc import AbstractAccessLogger
 from .log import client_logger
 
 
-try:
-    from asyncio import ensure_future
-except ImportError:
-    ensure_future = getattr(asyncio, 'async')
+__all__ = ('BasicAuth',)
 
-PY_34 = sys.version_info < (3, 5)
-PY_35 = sys.version_info >= (3, 5)
-PY_352 = sys.version_info >= (3, 5, 2)
+PY_36 = sys.version_info >= (3, 6)
 
-if sys.version_info >= (3, 4, 3):
-    from http.cookies import SimpleCookie  # noqa
-else:
-    from .backport_cookies import SimpleCookie  # noqa
-
-
-__all__ = ('BasicAuth', 'Timeout')
+if sys.version_info < (3, 7):
+    import idna_ssl
+    idna_ssl.patch_match_hostname()
 
 
 sentinel = object()
-Timeout = timeout
 NO_EXTENSIONS = bool(os.environ.get('AIOHTTP_NO_EXTENSIONS'))
 
 CHAR = set(chr(i) for i in range(0, 128))
@@ -54,96 +47,6 @@ CTL = set(chr(i) for i in range(0, 32)) | {chr(127), }
 SEPARATORS = {'(', ')', '<', '>', '@', ',', ';', ':', '\\', '"', '/', '[', ']',
               '?', '=', '{', '}', ' ', chr(9)}
 TOKEN = CHAR ^ CTL ^ SEPARATORS
-
-
-if PY_35:
-    from collections.abc import Coroutine
-    base = Coroutine
-else:
-    base = object
-
-
-class _BaseCoroMixin(base):
-
-    __slots__ = ('_coro')
-
-    def __init__(self, coro):
-        self._coro = coro
-
-    def send(self, arg):
-        return self._coro.send(arg)
-
-    def throw(self, arg):
-        return self._coro.throw(arg)
-
-    def close(self):
-        return self._coro.close()
-
-    @property
-    def gi_frame(self):
-        return self._coro.gi_frame
-
-    @property
-    def gi_running(self):
-        return self._coro.gi_running
-
-    @property
-    def gi_code(self):
-        return self._coro.gi_code
-
-    def __next__(self):
-        return self.send(None)
-
-    @asyncio.coroutine
-    def __iter__(self):
-        ret = yield from self._coro
-        return ret
-
-    if PY_35:
-        def __await__(self):
-            ret = yield from self._coro
-            return ret
-
-
-if not PY_35:
-    try:
-        from asyncio import coroutines
-        coroutines._COROUTINE_TYPES += (_BaseCoroMixin,)
-    except:  # pragma: no cover
-        pass  # Python 3.4.2 and 3.4.3 has no coroutines._COROUTINE_TYPES
-
-
-class _CoroGuard(_BaseCoroMixin):
-    """Only to be used with func:`deprecated_noop`.
-
-    Otherwise the stack information in the raised warning doesn't line up with
-    the user's code anymore.
-    """
-    __slots__ = ('_msg', '_awaited')
-
-    def __init__(self, coro, msg):
-        super().__init__(coro)
-        self._msg = msg
-        self._awaited = False
-
-    def send(self, arg):
-        self._awaited = True
-        return self._coro.send(arg)
-
-    @asyncio.coroutine
-    def __iter__(self):
-        self._awaited = True
-        return super().__iter__()
-
-    if PY_35:
-        def __await__(self):
-            self._awaited = True
-            return super().__await__()
-
-    def __del__(self):
-        self._coro = None
-        if not self._awaited:
-            warnings.warn(self._msg, DeprecationWarning, stacklevel=2)
 
 
 coroutines = asyncio.coroutines
@@ -156,18 +59,7 @@ def noop(*args, **kwargs):
     return
 
 
-def deprecated_noop(message):
-    return _CoroGuard(noop(), message)
-
-
 coroutines._DEBUG = old_debug
-
-
-try:
-    from asyncio import isfuture
-except ImportError:
-    def isfuture(fut):
-        return isinstance(fut, asyncio.Future)
 
 
 class BasicAuth(namedtuple('BasicAuth', ['login', 'password', 'encoding'])):
@@ -229,12 +121,43 @@ def strip_auth_from_url(url):
         return url.with_user(None), auth
 
 
-ProxyInfo = namedtuple('ProxyInfo', 'proxy proxy_auth')
+def netrc_from_env():
+    netrc_obj = None
+    netrc_path = os.environ.get('NETRC')
+    try:
+        if netrc_path is not None:
+            netrc_path = Path(netrc_path)
+        else:
+            home_dir = Path.home()
+            if os.name == 'nt':  # pragma: no cover
+                netrc_path = home_dir.joinpath('_netrc')
+            else:
+                netrc_path = home_dir.joinpath('.netrc')
+
+        if netrc_path and netrc_path.is_file():
+            try:
+                netrc_obj = netrc.netrc(str(netrc_path))
+            except (netrc.NetrcParseError, OSError) as e:
+                client_logger.warning(".netrc file parses fail: %s", e)
+
+        if netrc_obj is None:
+            client_logger.warning("could't find .netrc file")
+    except RuntimeError as e:  # pragma: no cover
+        """ handle error raised by pathlib """
+        client_logger.warning("could't find .netrc file: %s", e)
+    return netrc_obj
+
+
+@attr.s(frozen=True, slots=True)
+class ProxyInfo:
+    proxy = attr.ib(type=str)
+    proxy_auth = attr.ib(type=BasicAuth)
 
 
 def proxies_from_env():
     proxy_urls = {k: URL(v) for k, v in getproxies().items()
                   if k in ('http', 'https')}
+    netrc_obj = netrc_from_env()
     stripped = {k: strip_auth_from_url(v) for k, v in proxy_urls.items()}
     ret = {}
     for proto, val in stripped.items():
@@ -243,18 +166,17 @@ def proxies_from_env():
             client_logger.warning(
                 "HTTPS proxies %s are not supported, ignoring", proxy)
             continue
+        if netrc_obj and auth is None:
+            auth_from_netrc = netrc_obj.authenticators(proxy.host)
+            if auth_from_netrc is not None:
+                # auth_from_netrc is a (`user`, `account`, `password`) tuple,
+                # `user` and `account` both can be username,
+                # if `user` is None, use `account`
+                *logins, password = auth_from_netrc
+                auth = BasicAuth(logins[0] if logins[0] else logins[-1],
+                                 password)
         ret[proto] = ProxyInfo(proxy, auth)
     return ret
-
-
-if PY_352:
-    def create_future(loop):
-        return loop.create_future()
-else:
-    def create_future(loop):  # pragma: no cover
-        """Compatibility wrapper for the loop.create_future() call introduced in
-        3.5.2."""
-        return asyncio.Future(loop=loop)
 
 
 def current_task(loop=None):
@@ -275,21 +197,30 @@ def isasyncgenfunction(obj):
     return False
 
 
+@attr.s(frozen=True, slots=True)
+class MimeType:
+    type = attr.ib(type=str)
+    subtype = attr.ib(type=str)
+    suffix = attr.ib(type=str)
+    parameters = attr.ib(type=MultiDict)
+
+
 def parse_mimetype(mimetype):
     """Parses a MIME type into its components.
 
     mimetype is a MIME type string.
 
-    Returns a 4 element tuple for MIME type, subtype, suffix and parameters.
+    Returns a MimeType object.
 
     Example:
 
     >>> parse_mimetype('text/html; charset=utf-8')
-    ('text', 'html', '', {'charset': 'utf-8'})
+    MimeType(type='text', subtype='html', suffix='',
+             parameters={'charset': 'utf-8'})
 
     """
     if not mimetype:
-        return '', '', '', {}
+        return MimeType(type='', subtype='', suffix='', parameters={})
 
     parts = mimetype.split(';')
     params = []
@@ -298,7 +229,7 @@ def parse_mimetype(mimetype):
             continue
         key, value = item.split('=', 1) if '=' in item else (item, '')
         params.append((key.lower().strip(), value.strip(' "')))
-    params = dict(params)
+    params = MultiDict(params)
 
     fulltype = parts[0].strip().lower()
     if fulltype == '*':
@@ -308,7 +239,8 @@ def parse_mimetype(mimetype):
         if '/' in fulltype else (fulltype, '')
     stype, suffix = stype.split('+', 1) if '+' in stype else (stype, '')
 
-    return mtype, stype, suffix, params
+    return MimeType(type=mtype, subtype=stype, suffix=suffix,
+                    parameters=params)
 
 
 def guess_filename(obj, default=None):
@@ -374,7 +306,7 @@ class AccessLogger(AbstractAccessLogger):
     """
     LOG_FORMAT_MAP = {
         'a': 'remote_address',
-        't': 'request_time',
+        't': 'request_start_time',
         'P': 'process_id',
         'r': 'first_request_line',
         's': 'response_status',
@@ -386,7 +318,7 @@ class AccessLogger(AbstractAccessLogger):
         'o': 'response_header',
     }
 
-    LOG_FORMAT = '%a %l %u %t "%r" %s %b "%{Referrer}i" "%{User-Agent}i"'
+    LOG_FORMAT = '%a %t "%r" %s %b "%{Referer}i" "%{User-Agent}i"'
     FORMAT_RE = re.compile(r'%(\{([A-Za-z0-9\-_]+)\}([ioe])|[atPrsbOD]|Tf?)')
     CLEANUP_RE = re.compile(r'(%[^s])')
     _FORMAT_CACHE = {}
@@ -430,10 +362,6 @@ class AccessLogger(AbstractAccessLogger):
         also receive key name (by functools.partial)
 
         """
-
-        log_format = log_format.replace("%l", "-")
-        log_format = log_format.replace("%u", "-")
-
         # list of (key, method) tuples, we don't use an OrderedDict as users
         # can repeat the same key more than once
         methods = list()
@@ -475,7 +403,9 @@ class AccessLogger(AbstractAccessLogger):
 
     @staticmethod
     def _format_t(request, response, time):
-        return datetime.datetime.utcnow().strftime('[%d/%b/%Y:%H:%M:%S +0000]')
+        now = datetime.datetime.utcnow()
+        start_time = now - datetime.timedelta(seconds=time)
+        return start_time.strftime('[%d/%b/%Y:%H:%M:%S +0000]')
 
     @staticmethod
     def _format_P(request, response, time):
@@ -524,7 +454,10 @@ class AccessLogger(AbstractAccessLogger):
                 if key.__class__ is str:
                     extra[key] = value
                 else:
-                    extra[key[0]] = {key[1]: value}
+                    k1, k2 = key
+                    dct = extra.get(k1, {})
+                    dct[k2] = value
+                    extra[k1] = dct
 
             self.logger.info(self._log_format % tuple(values), extra=extra)
         except Exception:
@@ -544,7 +477,7 @@ class reify:
         self.wrapped = wrapped
         try:
             self.__doc__ = wrapped.__doc__
-        except:  # pragma: no cover
+        except Exception:  # pragma: no cover
             self.__doc__ = ""
         self.name = wrapped.__name__
 
@@ -630,10 +563,8 @@ def _weakref_handle(info):
     ref, name = info
     ob = ref()
     if ob is not None:
-        try:
+        with suppress(Exception):
             getattr(ob, name)()
-        except:
-            pass
 
 
 def weakref_handle(ob, name, timeout, loop, ceil_timeout=True):
@@ -680,10 +611,8 @@ class TimeoutHandle:
 
     def __call__(self):
         for cb, args, kwargs in self._callbacks:
-            try:
+            with suppress(Exception):
                 cb(*args, **kwargs)
-            except:
-                pass
 
         self._callbacks.clear()
 
@@ -734,7 +663,7 @@ class TimerContext:
             self._cancelled = True
 
 
-class CeilTimeout(Timeout):
+class CeilTimeout(async_timeout.timeout):
 
     def __enter__(self):
         if self._timeout is not None:
@@ -748,6 +677,9 @@ class CeilTimeout(Timeout):
 
 
 class HeadersMixin:
+
+    ATTRS = frozenset([
+        '_content_type', '_content_dict', '_stored_content_type'])
 
     _content_type = None
     _content_dict = None
@@ -781,8 +713,17 @@ class HeadersMixin:
     @property
     def content_length(self, *, _CONTENT_LENGTH=hdrs.CONTENT_LENGTH):
         """The value of Content-Length HTTP header."""
-        l = self._headers.get(_CONTENT_LENGTH)
-        if l is None:
-            return None
-        else:
-            return int(l)
+        content_length = self._headers.get(_CONTENT_LENGTH)
+
+        if content_length:
+            return int(content_length)
+
+
+def set_result(fut, result):
+    if not fut.done():
+        fut.set_result(result)
+
+
+def set_exception(fut, exc):
+    if not fut.done():
+        fut.set_exception(exc)

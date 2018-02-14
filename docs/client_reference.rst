@@ -34,10 +34,8 @@ Usage example::
              print(html)
 
      loop = asyncio.get_event_loop()
-     loop.run_until_complete(main(loop))
+     loop.run_until_complete(main())
 
-
-.. versionadded:: 0.17
 
 The client session supports the context manager protocol for self closing.
 
@@ -93,8 +91,6 @@ The client session supports the context manager protocol for self closing.
 
    :param version: supported HTTP version, ``HTTP 1.1`` by default.
 
-      .. versionadded:: 0.21
-
    :param cookie_jar: Cookie Jar, :class:`AbstractCookieJar` instance.
 
       By default every session instance has own private cookie jar for
@@ -105,10 +101,8 @@ The client session supports the context manager protocol for self closing.
       proxy mode.
 
       If no cookie processing is needed, a
-      :class:`aiohttp.helpers.DummyCookieJar` instance can be
+      :class:`aiohttp.DummyCookieJar` instance can be
       provided.
-
-      .. versionadded:: 0.22
 
    :param callable json_serialize: Json *serializer* callable.
 
@@ -133,7 +127,7 @@ The client session supports the context manager protocol for self closing.
 
       Close connector instance on session closing.
 
-      Passing ``connector_owner=False`` to constructor allows to share
+      Setting the parameter to ``False`` allows to share
       connection pool between sessions without sharing session state:
       cookies etc.
 
@@ -147,7 +141,18 @@ The client session supports the context manager protocol for self closing.
                          *HTTPS_PROXY* environment variables if the
                          parameter is ``True`` (``False`` by default).
 
+                         Get proxy credentials from ``~/.netrc`` file if
+                         present.
+
+      .. seealso::
+
+         ``.netrc`` documentation: https://www.gnu.org/software/inetutils/manual/html_node/The-_002enetrc-file.html
+
       .. versionadded:: 2.3
+
+      .. versionchanged:: 3.0
+
+         Added support for ``~/.netrc`` file.
 
    .. attribute:: closed
 
@@ -169,8 +174,6 @@ The client session supports the context manager protocol for self closing.
       Gives access to cookie jar's content and modifiers.
 
       A read-only property.
-
-      .. versionadded:: 1.0
 
    .. attribute:: requote_redirect_url
 
@@ -194,7 +197,8 @@ The client session supports the context manager protocol for self closing.
                          max_redirects=10,\
                          compress=None, chunked=None, expect100=False,\
                          read_until_eof=True, proxy=None, proxy_auth=None,\
-                         timeout=5*60, verify_ssl=None, fingerprint=None, \
+                         timeout=5*60, ssl=None, \
+                         verify_ssl=None, fingerprint=None, \
                          ssl_context=None, proxy_headers=None)
       :async-with:
       :coroutine:
@@ -274,20 +278,40 @@ The client session supports the context manager protocol for self closing.
       :param int timeout: override the session's timeout
                           (``read_timeout``) for IO operations.
 
+      :param ssl: SSL validation mode. ``None`` for default SSL check
+                  (:func:`ssl.create_default_context` is used),
+                  ``False`` for skip SSL certificate validation,
+                  :class:`aiohttp.Fingerprint` for fingerprint
+                  validation, :class:`ssl.SSLContext` for custom SSL
+                  certificate validation.
+
+                  Supersedes *verify_ssl*, *ssl_context* and
+                  *fingerprint* parameters.
+
+         .. versionadded:: 3.0
+
       :param bool verify_ssl: Perform SSL certificate validation for
          *HTTPS* requests (enabled by default). May be disabled to
          skip validation for sites with invalid certificates.
 
          .. versionadded:: 2.3
 
+         .. deprecated:: 3.0
+
+            Use ``ssl=False``
+
       :param bytes fingerprint: Pass the SHA256 digest of the expected
-           certificate in DER format to verify that the certificate the
-           server presents matches. Useful for `certificate pinning
-           <https://en.wikipedia.org/wiki/Transport_Layer_Security#Certificate_pinning>`_.
+         certificate in DER format to verify that the certificate the
+         server presents matches. Useful for `certificate pinning
+         <https://en.wikipedia.org/wiki/Transport_Layer_Security#Certificate_pinning>`_.
 
-           Warning: use of MD5 or SHA1 digests is insecure and deprecated.
+         Warning: use of MD5 or SHA1 digests is insecure and removed.
 
-           .. versionadded:: 2.3
+         .. versionadded:: 2.3
+
+         .. deprecated:: 3.0
+
+            Use ``ssl=aiohttp.Fingerprint(digest)``
 
       :param ssl.SSLContext ssl_context: ssl context used for processing
          *HTTPS* requests (optional).
@@ -297,23 +321,23 @@ The client session supports the context manager protocol for self closing.
 
          .. versionadded:: 2.3
 
+         .. deprecated:: 3.0
+
+            Use ``ssl=ssl_context``
+
       :param abc.Mapping proxy_headers: HTTP headers to send to the proxy if the
          parameter proxy has been provided.
 
          .. versionadded:: 2.3
 
+      :param trace_request_ctx: Object used to give as a kw param for each new
+        :class:`TraceConfig` object instantiated, used to give information to the
+        tracers that is only available at request time.
+
+         .. versionadded:: 3.0
+
       :return ClientResponse: a :class:`client response <ClientResponse>`
          object.
-
-      .. versionadded:: 1.0
-
-         Added ``proxy`` and ``proxy_auth`` parameters.
-
-         Added ``timeout`` parameter.
-
-      .. versionchanged:: 1.1
-
-         URLs may be either :class:`str` or :class:`~yarl.URL`
 
    .. comethod:: get(url, *, allow_redirects=True, **kwargs)
       :async-with:
@@ -322,7 +346,7 @@ The client session supports the context manager protocol for self closing.
       Perform a ``GET`` request.
 
       In order to modify inner
-      :meth:`request<aiohttp.client.ClientSession.request>`
+      :meth:`request<aiohttp.ClientSession.request>`
       parameters, provide `kwargs`.
 
       :param url: Request URL, :class:`str` or :class:`~yarl.URL`
@@ -333,10 +357,6 @@ The client session supports the context manager protocol for self closing.
       :return ClientResponse: a :class:`client response
                               <ClientResponse>` object.
 
-      .. versionchanged:: 1.1
-
-         URLs may be either :class:`str` or :class:`~yarl.URL`
-
    .. comethod:: post(url, *, data=None, **kwargs)
       :async-with:
       :coroutine:
@@ -344,7 +364,7 @@ The client session supports the context manager protocol for self closing.
       Perform a ``POST`` request.
 
       In order to modify inner
-      :meth:`request<aiohttp.client.ClientSession.request>`
+      :meth:`request<aiohttp.ClientSession.request>`
       parameters, provide `kwargs`.
 
 
@@ -355,10 +375,6 @@ The client session supports the context manager protocol for self closing.
 
       :return ClientResponse: a :class:`client response
                               <ClientResponse>` object.
-
-      .. versionchanged:: 1.1
-
-         URLs may be either :class:`str` or :class:`~yarl.URL`
 
    .. comethod:: put(url, *, data=None, **kwargs)
       :async-with:
@@ -367,7 +383,7 @@ The client session supports the context manager protocol for self closing.
       Perform a ``PUT`` request.
 
       In order to modify inner
-      :meth:`request<aiohttp.client.ClientSession.request>`
+      :meth:`request<aiohttp.ClientSession.request>`
       parameters, provide `kwargs`.
 
 
@@ -379,10 +395,6 @@ The client session supports the context manager protocol for self closing.
       :return ClientResponse: a :class:`client response
                               <ClientResponse>` object.
 
-      .. versionchanged:: 1.1
-
-         URLs may be either :class:`str` or :class:`~yarl.URL`
-
    .. comethod:: delete(url, **kwargs)
       :async-with:
       :coroutine:
@@ -390,17 +402,13 @@ The client session supports the context manager protocol for self closing.
       Perform a ``DELETE`` request.
 
       In order to modify inner
-      :meth:`request<aiohttp.client.ClientSession.request>`
+      :meth:`request<aiohttp.ClientSession.request>`
       parameters, provide `kwargs`.
 
       :param url: Request URL, :class:`str` or :class:`~yarl.URL`
 
       :return ClientResponse: a :class:`client response
                               <ClientResponse>` object.
-
-      .. versionchanged:: 1.1
-
-         URLs may be either :class:`str` or :class:`~yarl.URL`
 
    .. comethod:: head(url, *, allow_redirects=False, **kwargs)
       :async-with:
@@ -409,7 +417,7 @@ The client session supports the context manager protocol for self closing.
       Perform a ``HEAD`` request.
 
       In order to modify inner
-      :meth:`request<aiohttp.client.ClientSession.request>`
+      :meth:`request<aiohttp.ClientSession.request>`
       parameters, provide `kwargs`.
 
       :param url: Request URL, :class:`str` or :class:`~yarl.URL`
@@ -420,10 +428,6 @@ The client session supports the context manager protocol for self closing.
       :return ClientResponse: a :class:`client response
                               <ClientResponse>` object.
 
-      .. versionchanged:: 1.1
-
-         URLs may be either :class:`str` or :class:`~yarl.URL`
-
    .. comethod:: options(url, *, allow_redirects=True, **kwargs)
       :async-with:
       :coroutine:
@@ -431,7 +435,7 @@ The client session supports the context manager protocol for self closing.
       Perform an ``OPTIONS`` request.
 
       In order to modify inner
-      :meth:`request<aiohttp.client.ClientSession.request>`
+      :meth:`request<aiohttp.ClientSession.request>`
       parameters, provide `kwargs`.
 
 
@@ -443,10 +447,6 @@ The client session supports the context manager protocol for self closing.
       :return ClientResponse: a :class:`client response
                               <ClientResponse>` object.
 
-      .. versionchanged:: 1.1
-
-         URLs may be either :class:`str` or :class:`~yarl.URL`
-
    .. comethod:: patch(url, *, data=None, **kwargs)
       :async-with:
       :coroutine:
@@ -454,7 +454,7 @@ The client session supports the context manager protocol for self closing.
       Perform a ``PATCH`` request.
 
       In order to modify inner
-      :meth:`request<aiohttp.client.ClientSession.request>`
+      :meth:`request<aiohttp.ClientSession.request>`
       parameters, provide `kwargs`.
 
       :param url: Request URL, :class:`str` or :class:`~yarl.URL`
@@ -466,10 +466,6 @@ The client session supports the context manager protocol for self closing.
       :return ClientResponse: a :class:`client response
                               <ClientResponse>` object.
 
-      .. versionchanged:: 1.1
-
-         URLs may be either :class:`str` or :class:`~yarl.URL`
-
    .. comethod:: ws_connect(url, *, protocols=(), timeout=10.0,\
                             receive_timeout=None,\
                             auth=None,\
@@ -477,7 +473,7 @@ The client session supports the context manager protocol for self closing.
                             autoping=True,\
                             heartbeat=None,\
                             origin=None, \
-                            proxy=None, proxy_auth=None, \
+                            proxy=None, proxy_auth=None, ssl=None, \
                             verify_ssl=None, fingerprint=None, \
                             ssl_context=None, proxy_headers=None, \
                             compress=0)
@@ -511,7 +507,8 @@ The client session supports the context manager protocol for self closing.
       :param float heartbeat: Send *ping* message every *heartbeat*
                               seconds and wait *pong* response, if
                               *pong* response is not received then
-                              close connection.
+                              close connection. The timer is reset on any data
+                              reception.
 
       :param str origin: Origin header to send to server
 
@@ -520,20 +517,40 @@ The client session supports the context manager protocol for self closing.
       :param aiohttp.BasicAuth proxy_auth: an object that represents proxy HTTP
                                            Basic Authorization (optional)
 
+      :param ssl: SSL validation mode. ``None`` for default SSL check
+                  (:func:`ssl.create_default_context` is used),
+                  ``False`` for skip SSL certificate validation,
+                  :class:`aiohttp.Fingerprint` for fingerprint
+                  validation, :class:`ssl.SSLContext` for custom SSL
+                  certificate validation.
+
+                  Supersedes *verify_ssl*, *ssl_context* and
+                  *fingerprint* parameters.
+
+         .. versionadded:: 3.0
+
       :param bool verify_ssl: Perform SSL certificate validation for
          *HTTPS* requests (enabled by default). May be disabled to
          skip validation for sites with invalid certificates.
 
          .. versionadded:: 2.3
 
+         .. deprecated:: 3.0
+
+            Use ``ssl=False``
+
       :param bytes fingerprint: Pass the SHA256 digest of the expected
-           certificate in DER format to verify that the certificate the
-           server presents matches. Useful for `certificate pinning
-           <https://en.wikipedia.org/wiki/Transport_Layer_Security#Certificate_pinning>`_.
+         certificate in DER format to verify that the certificate the
+         server presents matches. Useful for `certificate pinning
+         <https://en.wikipedia.org/wiki/Transport_Layer_Security#Certificate_pinning>`_.
 
-           Note: use of MD5 or SHA1 digests is insecure and deprecated.
+         Note: use of MD5 or SHA1 digests is insecure and deprecated.
 
-           .. versionadded:: 2.3
+         .. versionadded:: 2.3
+
+         .. deprecated:: 3.0
+
+            Use ``ssl=aiohttp.Fingerprint(digest)``
 
       :param ssl.SSLContext ssl_context: ssl context used for processing
          *HTTPS* requests (optional).
@@ -548,6 +565,9 @@ The client session supports the context manager protocol for self closing.
 
          .. versionadded:: 2.3
 
+         .. deprecated:: 3.0
+
+            Use ``ssl=ssl_context``
 
       :param int compress: Enable Per-Message Compress Extension support.
                            0 for disable, 9 to 15 for window bit support.
@@ -569,6 +589,7 @@ The client session supports the context manager protocol for self closing.
       Session is switched to closed state anyway.
 
 
+
 Basic API
 ---------
 
@@ -580,18 +601,20 @@ keepaliving, cookies and complex connection stuff like properly configured SSL
 certification chaining.
 
 
-.. coroutinefunction:: request(method, url, *, params=None, data=None, \
-                               json=None,\
-                               headers=None, cookies=None, auth=None, \
-                               allow_redirects=True, max_redirects=10, \
-                               encoding='utf-8', \
-                               version=HttpVersion(major=1, minor=1), \
-                               compress=None, chunked=None, expect100=False, \
-                               connector=None, loop=None,\
-                               read_until_eof=True)
+.. cofunction:: request(method, url, *, params=None, data=None, \
+                        json=None,\
+                        headers=None, cookies=None, auth=None, \
+                        allow_redirects=True, max_redirects=10, \
+                        encoding='utf-8', \
+                        version=HttpVersion(major=1, minor=1), \
+                        compress=None, chunked=None, expect100=False, \
+                        connector=None, loop=None,\
+                        read_until_eof=True)
 
-   Perform an asynchronous HTTP request. Return a response object
-   (:class:`ClientResponse` or derived from).
+   :async-with:
+
+   Asynchronous context manager for performing an asynchronous HTTP
+   request. Returns a :class:`ClientResponse` response object.
 
    :param str method: HTTP method
 
@@ -653,10 +676,6 @@ certification chaining.
           async with aiohttp.request('GET', 'http://python.org/') as resp:
               assert resp.status == 200
               print(await resp.text())
-
-   .. versionchanged:: 1.1
-
-      URLs may be either :class:`str` or :class:`~yarl.URL`
 
 
 .. _aiohttp-client-reference-connectors:
@@ -727,8 +746,6 @@ BaseConnector
       Read-only property, ``True`` if connector should ultimately
       close connections on releasing.
 
-      .. versionadded:: 0.16
-
    .. attribute:: limit
 
       The total number for simultaneous connections.
@@ -760,7 +777,7 @@ BaseConnector
       The call may be paused if :attr:`limit` is exhausted until used
       connections returns to pool.
 
-      :param aiohttp.client.ClientRequest request: request object
+      :param aiohttp.ClientRequest request: request object
                                                    which is connection
                                                    initiator.
 
@@ -777,7 +794,7 @@ BaseConnector
 TCPConnector
 ^^^^^^^^^^^^
 
-.. class:: TCPConnector(*, verify_ssl=True, fingerprint=None, \
+.. class:: TCPConnector(*, ssl=None, verify_ssl=True, fingerprint=None, \
                  use_dns_cache=True, ttl_dns_cache=10, \
                  family=0, ssl_context=None, local_addr=None, \
                  resolver=None, keepalive_timeout=sentinel, \
@@ -794,6 +811,18 @@ TCPConnector
    Constructor accepts all parameters suitable for
    :class:`BaseConnector` plus several TCP-specific ones:
 
+      :param ssl: SSL validation mode. ``None`` for default SSL check
+                  (:func:`ssl.create_default_context` is used),
+                  ``False`` for skip SSL certificate validation,
+                  :class:`aiohttp.Fingerprint` for fingerprint
+                  validation, :class:`ssl.SSLContext` for custom SSL
+                  certificate validation.
+
+                  Supersedes *verify_ssl*, *ssl_context* and
+                  *fingerprint* parameters.
+
+         .. versionadded:: 3.0
+
    :param bool verify_ssl: perform SSL certificate validation for
       *HTTPS* requests (enabled by default). May be disabled to
       skip validation for sites with invalid certificates.
@@ -809,8 +838,6 @@ TCPConnector
 
       Note: use of MD5 or SHA1 digests is insecure and deprecated.
 
-      .. versionadded:: 0.16
-
       .. deprecated:: 2.3
 
          Pass *verify_ssl* to ``ClientSession.get()`` etc.
@@ -821,12 +848,6 @@ TCPConnector
       Enabling an option *may* speedup connection
       establishing a bit but may introduce some
       *side effects* also.
-
-      .. versionadded:: 0.17
-
-      .. versionchanged:: 1.0
-
-         The default is changed to ``True``
 
    :param int ttl_dns_cache: expire after some seconds the DNS entries, ``None``
       means cached forever. By default 10 seconds.
@@ -853,22 +874,19 @@ TCPConnector
       Custom resolvers allow to resolve hostnames differently than the
       way the host is configured.
 
-      .. versionchanged:: 1.1
-
-         The resolver is ``aiohttp.ThreadedResolver`` by default,
-         asynchronous version is not pretty robust but might fail in
-         very rare cases.
+      The resolver is ``aiohttp.ThreadedResolver`` by default,
+      asynchronous version is pretty robust but might fail in
+      very rare cases.
 
    :param int family: TCP socket family, both IPv4 and IPv6 by default.
                       For *IPv4* only use :const:`socket.AF_INET`,
                       for  *IPv6* only -- :const:`socket.AF_INET6`.
 
-      .. versionchanged:: 0.18
-
-         *family* is `0` by default, that means both IPv4 and IPv6 are
-         accepted. To specify only concrete version please pass
-         :const:`socket.AF_INET` or :const:`socket.AF_INET6`
-         explicitly.
+                      *family* is ``0`` by default, that means both
+                      IPv4 and IPv6 are accepted. To specify only
+                      concrete version please pass
+                      :const:`socket.AF_INET` or
+                      :const:`socket.AF_INET6` explicitly.
 
    :param ssl.SSLContext ssl_context: SSL context used for processing
       *HTTPS* requests (optional).
@@ -879,8 +897,6 @@ TCPConnector
    :param tuple local_addr: tuple of ``(local_host, local_port)`` used to bind
       socket locally if specified.
 
-      .. versionadded:: 0.21
-
    :param bool force_close: close underlying sockets after
                             connection releasing (optional).
 
@@ -888,16 +904,6 @@ TCPConnector
       SSL shutdown process, in that case asyncio leaks SSL connections.
       If this parameter is set to True, aiohttp additionally aborts underlining
       transport after 2 seconds. It is off by default.
-
-   .. attribute:: verify_ssl
-
-      Check *ssl certifications* if ``True``.
-
-      Read-only :class:`bool` property.
-
-   .. attribute:: ssl_context
-
-      :class:`ssl.SSLContext` instance for *https* requests, read-only property.
 
    .. attribute:: family
 
@@ -912,25 +918,11 @@ TCPConnector
 
       Read-only :class:`bool` property.
 
-      .. versionadded:: 0.17
-
    .. attribute:: cached_hosts
 
       The cache of resolved hosts if :attr:`dns_cache` is enabled.
 
       Read-only :class:`types.MappingProxyType` property.
-
-      .. versionadded:: 0.17
-
-   .. attribute:: fingerprint
-
-      MD5, SHA1, or SHA256 hash of the expected certificate in DER
-      format, or ``None`` if no certificate fingerprint check
-      required.
-
-      Read-only :class:`bytes` property.
-
-      .. versionadded:: 0.16
 
    .. method:: clear_dns_cache(self, host=None, port=None)
 
@@ -938,8 +930,6 @@ TCPConnector
 
       Remove specific entry if both *host* and *port* are specified,
       clear all cache otherwise.
-
-      .. versionadded:: 0.17
 
 
 UnixConnector
@@ -1039,10 +1029,6 @@ Response object
    After exiting from ``async with`` block response object will be
    *released* (see :meth:`release` coroutine).
 
-   .. versionadded:: 0.18
-
-      Support for ``async with``.
-
    .. attribute:: version
 
       Response's version, :class:`HttpVersion` instance.
@@ -1109,12 +1095,19 @@ Response object
 
    .. attribute:: charset
 
-   Read-only property that specifies the *encoding* for the request's BODY.
+      Read-only property that specifies the *encoding* for the request's BODY.
 
       The value is parsed from the *Content-Type* HTTP header.
 
       Returns :class:`str` like ``'utf-8'`` or ``None`` if no *Content-Type*
       header present in HTTP headers or it has no charset information.
+
+   .. attribute:: content_disposition
+
+      Read-only property that specified the *Content-Disposition* HTTP header.
+
+      Instance of :class:`ContentDisposition` or ``None`` if no *Content-Disposition*
+      header present in HTTP headers.
 
    .. attribute:: history
 
@@ -1223,6 +1216,15 @@ Response object
        A namedtuple with request URL and headers from :class:`ClientRequest`
        object, :class:`aiohttp.RequestInfo` instance.
 
+   .. method:: get_encoding()
+
+      Automatically detect content encoding using ``charset`` info in
+      ``Content-Type`` HTTP header. If this info is not exists or there
+      are no appropriate codecs for encoding then :term:`cchardet` /
+      :term:`chardet` is used.
+
+      .. versionadded:: 3.0
+
 
 ClientWebSocketResponse
 -----------------------
@@ -1256,7 +1258,7 @@ manually.
 
       Returns exception if any occurs or returns None.
 
-   .. method:: ping(message=b'')
+   .. comethod:: ping(message=b'')
 
       Send :const:`~aiohttp.WSMsgType.PING` to peer.
 
@@ -1264,28 +1266,66 @@ manually.
                       :class:`str` (converted to *UTF-8* encoded bytes)
                       or :class:`bytes`.
 
-   .. comethod:: send_str(data)
+      .. versionchanged:: 3.0
+
+         The method is converted into :term:`coroutine`
+
+   .. comethod:: pong(message=b'')
+
+      Send :const:`~aiohttp.WSMsgType.PONG` to peer.
+
+      :param message: optional payload of *pong* message,
+                      :class:`str` (converted to *UTF-8* encoded bytes)
+                      or :class:`bytes`.
+
+      .. versionchanged:: 3.0
+
+         The method is converted into :term:`coroutine`
+
+   .. comethod:: send_str(data, compress=None)
 
       Send *data* to peer as :const:`~aiohttp.WSMsgType.TEXT` message.
 
       :param str data: data to send.
 
+      :param int compress: sets specific level of compression for
+                           single message,
+                           ``None`` for not overriding per-socket setting.
+
       :raise TypeError: if data is not :class:`str`
 
-   .. comethod:: send_bytes(data)
+      .. versionchanged:: 3.0
+
+         The method is converted into :term:`coroutine`,
+         *compress* parameter added.
+
+   .. comethod:: send_bytes(data, compress=None)
 
       Send *data* to peer as :const:`~aiohttp.WSMsgType.BINARY` message.
 
       :param data: data to send.
 
+      :param int compress: sets specific level of compression for
+                           single message,
+                           ``None`` for not overriding per-socket setting.
+
       :raise TypeError: if data is not :class:`bytes`,
                         :class:`bytearray` or :class:`memoryview`.
 
-   .. comethod:: send_json(data, *, dumps=json.dumps)
+      .. versionchanged:: 3.0
+
+         The method is converted into :term:`coroutine`,
+         *compress* parameter added.
+
+   .. comethod:: send_json(data, compress=None, *, dumps=json.dumps)
 
       Send *data* to peer as JSON string.
 
       :param data: data to send.
+
+      :param int compress: sets specific level of compression for
+                           single message,
+                           ``None`` for not overriding per-socket setting.
 
       :param callable dumps: any :term:`callable` that accepts an object and
                              returns a JSON string
@@ -1297,6 +1337,11 @@ manually.
 
       :raise TypeError: if value returned by ``dumps(data)`` is not
                         :class:`str`
+
+      .. versionchanged:: 3.0
+
+         The method is converted into :term:`coroutine`,
+         *compress* parameter added.
 
    .. comethod:: close(*, code=1000, message=b'')
 
@@ -1516,6 +1561,27 @@ CookieJar
       jar = aiohttp.DummyCookieJar()
       session = aiohttp.ClientSession(cookie_jar=DummyCookieJar())
 
+
+.. class:: Fingerprint(digest)
+
+   Fingerprint helper for checking SSL certificates by *SHA256* digest.
+
+   :param bytes digest: *SHA256* digest for certificate in DER-encoded
+                        binary form (see
+                        :meth:`ssl.SSLSocket.getpeercert`).
+
+   To check fingerprint pass the object into :meth:`ClientSession.get`
+   call, e.g.::
+
+      import hashlib
+
+      with open(path_to_cert, 'rb') as f:
+          digest = hashlib.sha256(f.read()).digest()
+
+      await session.get(url, ssl=aiohttp.Fingerprint(digest))
+
+   .. versionadded:: 3.0
+
 Client exceptions
 -----------------
 
@@ -1561,6 +1627,23 @@ All exceptions are available as members of *aiohttp* module.
 
       Invalid URL, :class:`yarl.URL` instance.
 
+.. class:: ContentDisposition
+
+    Represent Content-Disposition header
+
+    .. attribute:: value
+
+    A :class:`str` instance. Value of Content-Disposition header
+    itself, e.g. ``attachment``.
+
+    .. attribute:: filename
+
+    A :class:`str` instance. Content filename extracted from
+    parameters. May be ``None``.
+
+    .. attribute:: parameters
+
+    Read-only mapping contains all parameters.
 
 Response errors
 ^^^^^^^^^^^^^^^
