@@ -1,4 +1,4 @@
-attrs>=17.4.0
+attrs>=17.3.0
 chardet<4.0,>=2.0
 multidict<5.0,>=4.0
 async_timeout<3.0,>=1.2

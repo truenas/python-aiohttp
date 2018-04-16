@@ -1,4 +1,4 @@
-From 09f050f18e69605a09f638a45e6738e7daa60cdd Mon Sep 17 00:00:00 2001
+From 3de99c20ba2eea70259b34f6c4cb4b3b7704834e Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Piotr=20O=C5=BCarowski?= <piotr@debian.org>
 Date: Wed, 14 Feb 2018 13:55:21 +0100
 Subject: bundle idna_ssl
@@ -13,23 +13,23 @@ Debian stable
  2 files changed, 3 insertions(+), 3 deletions(-)
 
 diff --git a/aiohttp/helpers.py b/aiohttp/helpers.py
-index 66cab71..5c44bae 100644
+index ff43b78..954faff 100644
 --- a/aiohttp/helpers.py
 +++ b/aiohttp/helpers.py
-@@ -35,7 +35,7 @@ __all__ = ('BasicAuth',)
- PY_36 = sys.version_info >= (3, 6)
+@@ -36,7 +36,7 @@ PY_36 = sys.version_info >= (3, 6)
+ PY_37 = sys.version_info >= (3, 7)
  
- if sys.version_info < (3, 7):
+ if not PY_37:
 -    import idna_ssl
 +    from aiohttp import idna_ssl
      idna_ssl.patch_match_hostname()
  
  
 diff --git a/setup.py b/setup.py
-index 82ff542..da844df 100644
+index 0a5142d..8874f19 100644
 --- a/setup.py
 +++ b/setup.py
-@@ -69,8 +69,8 @@ install_requires = ['attrs>=17.4.0', 'chardet>=2.0,<4.0',
+@@ -73,8 +73,8 @@ install_requires = ['attrs>=17.3.0', 'chardet>=2.0,<4.0',
                      'async_timeout>=1.2,<3.0',
                      'yarl>=1.0,<2.0']
  

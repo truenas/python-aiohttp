@@ -29,16 +29,23 @@ from .web_response import Response
 __all__ = ('UrlDispatcher', 'UrlMappingMatchInfo',
            'AbstractResource', 'Resource', 'PlainResource', 'DynamicResource',
            'AbstractRoute', 'ResourceRoute',
-           'StaticResource', 'View', 'RouteDef', 'RouteTableDef',
-           'head', 'get', 'post', 'patch', 'put', 'delete', 'route', 'view')
+           'StaticResource', 'View', 'RouteDef', 'StaticDef', 'RouteTableDef',
+           'head', 'get', 'post', 'patch', 'put', 'delete', 'route', 'view',
+           'static')
 
 HTTP_METHOD_RE = re.compile(r"^[0-9A-Za-z!#\$%&'\*\+\-\.\^_`\|~]+$")
 ROUTE_RE = re.compile(r'(\{[_a-zA-Z][^{}]*(?:\{[^{}]*\}[^{}]*)*\})')
 PATH_SEP = re.escape('/')
 
 
+class AbstractRouteDef(abc.ABC):
+    @abc.abstractmethod
+    def register(self, router):
+        pass  # pragma: no cover
+
+
 @attr.s(frozen=True, repr=False, slots=True)
-class RouteDef:
+class RouteDef(AbstractRouteDef):
     method = attr.ib(type=str)
     path = attr.ib(type=str)
     handler = attr.ib()
@@ -59,6 +66,24 @@ class RouteDef:
         else:
             router.add_route(self.method, self.path, self.handler,
                              **self.kwargs)
+
+
+@attr.s(frozen=True, repr=False, slots=True)
+class StaticDef(AbstractRouteDef):
+    prefix = attr.ib(type=str)
+    path = attr.ib(type=str)
+    kwargs = attr.ib()
+
+    def __repr__(self):
+        info = []
+        for name, value in sorted(self.kwargs.items()):
+            info.append(", {}={!r}".format(name, value))
+        return ("<StaticDef {prefix} -> {path}"
+                "{info}>".format(prefix=self.prefix, path=self.path,
+                                 info=''.join(info)))
+
+    def register(self, router):
+        router.add_static(self.prefix, self.path, **self.kwargs)
 
 
 class AbstractResource(Sized, Iterable):
@@ -258,7 +283,8 @@ async def _default_expect_handler(request):
     expect = request.headers.get(hdrs.EXPECT)
     if request.version == HttpVersion11:
         if expect.lower() == "100-continue":
-            request.writer.write(b"HTTP/1.1 100 Continue\r\n\r\n", drain=False)
+            await request.writer.write(
+                b"HTTP/1.1 100 Continue\r\n\r\n", drain=False)
         else:
             raise HTTPExpectationFailed(text="Unknown Expect: %s" % expect)
 
@@ -552,14 +578,22 @@ class StaticResource(PrefixResource):
         return iter(self._routes.values())
 
     async def _handle(self, request):
-        filename = request.match_info['filename']
+        rel_url = request.match_info['filename']
         try:
+            filename = Path(rel_url)
+            if filename.anchor:
+                # rel_url is an absolute name like
+                # /static/\\machine_name\c$ or /static/D:\path
+                # where the static dir is totally different
+                raise HTTPForbidden()
             filepath = self._directory.joinpath(filename).resolve()
             if not self._follow_symlinks:
                 filepath.relative_to(self._directory)
         except (ValueError, FileNotFoundError) as error:
             # relatively safe
             raise HTTPNotFound() from error
+        except HTTPForbidden:
+            raise
         except Exception as error:
             # perm error or other kind!
             request.app.logger.exception(error)
@@ -986,6 +1020,10 @@ def view(path, handler, **kwargs):
     return route(hdrs.METH_ANY, path, handler, **kwargs)
 
 
+def static(prefix, path, **kwargs):
+    return StaticDef(prefix, path, kwargs)
+
+
 class RouteTableDef(Sequence):
     """Route definition table"""
     def __init__(self):
@@ -1032,3 +1070,6 @@ class RouteTableDef(Sequence):
 
     def view(self, path, **kwargs):
         return self.route(hdrs.METH_ANY, path, **kwargs)
+
+    def static(self, prefix, path, **kwargs):
+        self._items.append(StaticDef(prefix, path, kwargs))

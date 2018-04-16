@@ -32,7 +32,8 @@ Key Features
 ============
 
 - Supports both client and server side of HTTP protocol.
-- Supports both client and server Web-Sockets out-of-the-box.
+- Supports both client and server Web-Sockets out-of-the-box without the
+  Callback Hell.
 - Web-server has middlewares and pluggable routing.
 
 
@@ -79,7 +80,7 @@ This is simple usage example:
         text = "Hello, " + name
         return web.Response(text=text)
 
-    async def wshandler(request):
+    async def wshandle(request):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
 
@@ -95,9 +96,9 @@ This is simple usage example:
 
 
     app = web.Application()
-    app.router.add_get('/echo', wshandler)
-    app.router.add_get('/', handle)
-    app.router.add_get('/{name}', handle)
+    app.add_routes([web.get('/', handle),
+                    web.get('/echo', wshandle),
+                    web.get('/{name}', handle)])
 
     web.run_app(app)
 
@@ -138,6 +139,7 @@ Requirements
 
 - Python >= 3.5.3
 - async-timeout_
+- attrs_
 - chardet_
 - multidict_
 - yarl_
@@ -147,6 +149,7 @@ recommended for sake of speed).
 
 .. _chardet: https://pypi.python.org/pypi/chardet
 .. _aiodns: https://pypi.python.org/pypi/aiodns
+.. _attrs: https://github.com/python-attrs/attrs
 .. _multidict: https://pypi.python.org/pypi/multidict
 .. _yarl: https://pypi.python.org/pypi/yarl
 .. _async-timeout: https://pypi.python.org/pypi/async_timeout
