@@ -700,10 +700,7 @@ class TCPConnector(BaseConnector):
                         await trace.send_dns_resolvehost_start(host)
 
                 addrs = await \
-                    asyncio.shield(self._resolver.resolve(host,
-                                                          port,
-                                                          family=self._family),
-                                   loop=self._loop)
+                    self._resolver.resolve(host, port, family=self._family)
                 if traces:
                     for trace in traces:
                         await trace.send_dns_resolvehost_end(host)
@@ -728,12 +725,12 @@ class TCPConnector(BaseConnector):
         if req.proxy:
             _, proto = await self._create_proxy_connection(
                 req,
-                traces=None
+                traces=traces
             )
         else:
             _, proto = await self._create_direct_connection(
                 req,
-                traces=None
+                traces=traces
             )
 
         return proto
@@ -813,10 +810,13 @@ class TCPConnector(BaseConnector):
         fingerprint = self._get_fingerprint(req)
 
         try:
-            hosts = await self._resolve_host(
+            # Cancelling this lookup should not cancel the underlying lookup
+            #  or else the cancel event will get broadcast to all the waiters
+            #  across all connections.
+            hosts = await asyncio.shield(self._resolve_host(
                 req.url.raw_host,
                 req.port,
-                traces=traces)
+                traces=traces), loop=self._loop)
         except OSError as exc:
             # in case of proxy it is not ClientProxyConnectionError
             # it is problem of resolving proxy ip itself
@@ -893,7 +893,7 @@ class TCPConnector(BaseConnector):
             proxy_req.url = req.url
             key = (req.host, req.port, req.ssl)
             conn = Connection(self, key, proto, self._loop)
-            proxy_resp = proxy_req.send(conn)
+            proxy_resp = await proxy_req.send(conn)
             try:
                 resp = await proxy_resp.start(conn, True)
             except BaseException:
@@ -908,7 +908,7 @@ class TCPConnector(BaseConnector):
                         raise ClientHttpProxyError(
                             proxy_resp.request_info,
                             resp.history,
-                            code=resp.status,
+                            status=resp.status,
                             message=resp.reason,
                             headers=resp.headers)
                     rawsock = transport.get_extra_info('socket', default=None)

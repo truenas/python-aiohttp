@@ -1,7 +1,5 @@
 """Tests for aiohttp/protocol.py"""
 
-import asyncio
-import unittest
 import zlib
 from unittest import mock
 
@@ -40,7 +38,10 @@ def protocol():
 @pytest.fixture(params=REQUEST_PARSERS)
 def parser(loop, protocol, request):
     """Parser implementations"""
-    return request.param(protocol, loop, 8190, 32768, 8190)
+    return request.param(protocol, loop,
+                         max_line_size=8190,
+                         max_headers=32768,
+                         max_field_size=8190)
 
 
 @pytest.fixture(params=REQUEST_PARSERS)
@@ -52,13 +53,21 @@ def request_cls(request):
 @pytest.fixture(params=RESPONSE_PARSERS)
 def response(loop, protocol, request):
     """Parser implementations"""
-    return request.param(protocol, loop, 8190, 32768, 8190)
+    return request.param(protocol, loop,
+                         max_line_size=8190,
+                         max_headers=32768,
+                         max_field_size=8190)
 
 
 @pytest.fixture(params=RESPONSE_PARSERS)
 def response_cls(request):
     """Parser implementations"""
     return request.param
+
+
+@pytest.fixture
+def stream():
+    return mock.Mock()
 
 
 def test_parse_headers(parser):
@@ -355,30 +364,80 @@ def test_invalid_name(parser):
         parser.feed_data(text)
 
 
-def test_max_header_field_size(parser):
-    name = b'test' * 10 * 1024
+@pytest.mark.parametrize('size', [40960, 8191])
+def test_max_header_field_size(parser, size):
+    name = b't' * size
     text = (b'GET /test HTTP/1.1\r\n' + name + b':data\r\n\r\n')
 
-    with pytest.raises(http_exceptions.LineTooLong):
+    match = ("400, message='Got more than 8190 bytes \({}\) when reading"
+             .format(size))
+    with pytest.raises(http_exceptions.LineTooLong, match=match):
         parser.feed_data(text)
 
 
-def test_max_header_value_size(parser):
-    name = b'test' * 10 * 1024
+def test_max_header_field_size_under_limit(parser):
+    name = b't' * 8190
+    text = (b'GET /test HTTP/1.1\r\n' + name + b':data\r\n\r\n')
+
+    messages, upgrade, tail = parser.feed_data(text)
+    msg = messages[0][0]
+    assert msg == (
+        'GET', '/test', (1, 1),
+        CIMultiDict({name.decode(): 'data'}),
+        ((name, b'data'),),
+        False, None, False, False, URL('/test'))
+
+
+@pytest.mark.parametrize('size', [40960, 8191])
+def test_max_header_value_size(parser, size):
+    name = b't' * size
     text = (b'GET /test HTTP/1.1\r\n'
             b'data:' + name + b'\r\n\r\n')
 
-    with pytest.raises(http_exceptions.LineTooLong):
+    match = ("400, message='Got more than 8190 bytes \({}\) when reading"
+             .format(size))
+    with pytest.raises(http_exceptions.LineTooLong, match=match):
         parser.feed_data(text)
 
 
-def test_max_header_value_size_continuation(parser):
-    name = b'test' * 10 * 1024
+def test_max_header_value_size_under_limit(parser):
+    value = b'A' * 8190
+    text = (b'GET /test HTTP/1.1\r\n'
+            b'data:' + value + b'\r\n\r\n')
+
+    messages, upgrade, tail = parser.feed_data(text)
+    msg = messages[0][0]
+    assert msg == (
+        'GET', '/test', (1, 1),
+        CIMultiDict({'data': value.decode()}),
+        ((b'data', value),),
+        False, None, False, False, URL('/test'))
+
+
+@pytest.mark.parametrize('size', [40965, 8191])
+def test_max_header_value_size_continuation(parser, size):
+    name = b'T' * (size - 5)
     text = (b'GET /test HTTP/1.1\r\n'
             b'data: test\r\n ' + name + b'\r\n\r\n')
 
-    with pytest.raises(http_exceptions.LineTooLong):
+    match = ("400, message='Got more than 8190 bytes \({}\) when reading"
+             .format(size))
+    with pytest.raises(http_exceptions.LineTooLong, match=match):
         parser.feed_data(text)
+
+
+def test_max_header_value_size_continuation_under_limit(parser):
+    value = b'A' * 8185
+    text = (b'GET /test HTTP/1.1\r\n'
+            b'data: test\r\n ' + value + b'\r\n\r\n')
+
+    messages, upgrade, tail = parser.feed_data(text)
+    msg = messages[0][0]
+    assert msg == (
+        'GET', '/test', (1, 1),
+        CIMultiDict({'data': 'test ' + value.decode()}),
+        ((b'data', b'test ' + value),),
+        False, None, False, False, URL('/test'))
 
 
 def test_http_request_parser(parser):
@@ -449,10 +508,23 @@ def test_http_request_parser_bad_version(parser):
         parser.feed_data(b'GET //get HT/11\r\n\r\n')
 
 
-def test_http_request_max_status_line(parser):
-    with pytest.raises(http_exceptions.LineTooLong):
+@pytest.mark.parametrize('size', [40965, 8191])
+def test_http_request_max_status_line(parser, size):
+    path = b't' * (size - 5)
+    match = ("400, message='Got more than 8190 bytes \({}\) when reading"
+             .format(size))
+    with pytest.raises(http_exceptions.LineTooLong, match=match):
         parser.feed_data(
-            b'GET /path' + b'test' * 10 * 1024 + b' HTTP/1.1\r\n\r\n')
+            b'GET /path' + path + b' HTTP/1.1\r\n\r\n')
+
+
+def test_http_request_max_status_line_under_limit(parser):
+    path = b't' * (8190 - 5)
+    messages, upgraded, tail = parser.feed_data(
+        b'GET /path' + path + b' HTTP/1.1\r\n\r\n')
+    msg = messages[0][0]
+    assert msg == ('GET', '/path' + path.decode(), (1, 1), CIMultiDict(), (),
+                   False, None, False, False, URL('/path' + path.decode()))
 
 
 def test_http_response_parser_utf8(response):
@@ -471,10 +543,24 @@ def test_http_response_parser_utf8(response):
     assert not tail
 
 
-def test_http_response_parser_bad_status_line_too_long(response):
-    with pytest.raises(http_exceptions.LineTooLong):
+@pytest.mark.parametrize('size', [40962, 8191])
+def test_http_response_parser_bad_status_line_too_long(response, size):
+    reason = b't' * (size - 2)
+    match = ("400, message='Got more than 8190 bytes \({}\) when reading"
+             .format(size))
+    with pytest.raises(http_exceptions.LineTooLong, match=match):
         response.feed_data(
-            b'HTTP/1.1 200 Ok' + b'test' * 10 * 1024 + b'\r\n\r\n')
+            b'HTTP/1.1 200 Ok' + reason + b'\r\n\r\n')
+
+
+def test_http_response_parser_status_line_under_limit(response):
+    reason = b'O' * 8190
+    messages, upgraded, tail = response.feed_data(
+        b'HTTP/1.1 200 ' + reason + b'\r\n\r\n')
+    msg = messages[0][0]
+    assert msg.version == (1, 1)
+    assert msg.code == 200
+    assert msg.reason == reason.decode()
 
 
 def test_http_response_parser_bad_version(response):
@@ -648,30 +734,26 @@ def test_url_parse_non_strict_mode(parser):
     assert payload.is_eof()
 
 
-class TestParsePayload(unittest.TestCase):
+class TestParsePayload:
 
-    def setUp(self):
-        self.stream = mock.Mock()
-        asyncio.set_event_loop(None)
-
-    def test_parse_eof_payload(self):
-        out = aiohttp.FlowControlDataQueue(self.stream)
+    def test_parse_eof_payload(self, stream):
+        out = aiohttp.FlowControlDataQueue(stream)
         p = HttpPayloadParser(out, readall=True)
         p.feed_data(b'data')
         p.feed_eof()
 
-        self.assertTrue(out.is_eof())
-        self.assertEqual([(bytearray(b'data'), 4)], list(out._buffer))
+        assert out.is_eof()
+        assert [(bytearray(b'data'), 4)] == list(out._buffer)
 
-    def test_parse_no_body(self):
-        out = aiohttp.FlowControlDataQueue(self.stream)
+    def test_parse_no_body(self, stream):
+        out = aiohttp.FlowControlDataQueue(stream)
         p = HttpPayloadParser(out, method='PUT')
 
-        self.assertTrue(out.is_eof())
-        self.assertTrue(p.done)
+        assert out.is_eof()
+        assert p.done
 
-    def test_parse_length_payload_eof(self):
-        out = aiohttp.FlowControlDataQueue(self.stream)
+    def test_parse_length_payload_eof(self, stream):
+        out = aiohttp.FlowControlDataQueue(stream)
 
         p = HttpPayloadParser(out, length=4)
         p.feed_data(b'da')
@@ -679,115 +761,112 @@ class TestParsePayload(unittest.TestCase):
         with pytest.raises(http_exceptions.ContentLengthError):
             p.feed_eof()
 
-    def test_parse_chunked_payload_size_error(self):
-        out = aiohttp.FlowControlDataQueue(self.stream)
+    def test_parse_chunked_payload_size_error(self, stream):
+        out = aiohttp.FlowControlDataQueue(stream)
         p = HttpPayloadParser(out, chunked=True)
-        self.assertRaises(
-            http_exceptions.TransferEncodingError, p.feed_data, b'blah\r\n')
-        self.assertIsInstance(
-            out.exception(), http_exceptions.TransferEncodingError)
+        with pytest.raises(http_exceptions.TransferEncodingError):
+            p.feed_data(b'blah\r\n')
+        assert isinstance(out.exception(),
+                          http_exceptions.TransferEncodingError)
 
-    def test_http_payload_parser_length(self):
-        out = aiohttp.FlowControlDataQueue(self.stream)
+    def test_http_payload_parser_length(self, stream):
+        out = aiohttp.FlowControlDataQueue(stream)
         p = HttpPayloadParser(out, length=2)
         eof, tail = p.feed_data(b'1245')
-        self.assertTrue(eof)
+        assert eof
 
-        self.assertEqual(b'12', b''.join(d for d, _ in out._buffer))
-        self.assertEqual(b'45', tail)
+        assert b'12' == b''.join(d for d, _ in out._buffer)
+        assert b'45' == tail
 
     _comp = zlib.compressobj(wbits=-zlib.MAX_WBITS)
     _COMPRESSED = b''.join([_comp.compress(b'data'), _comp.flush()])
 
-    def test_http_payload_parser_deflate(self):
+    def test_http_payload_parser_deflate(self, stream):
         length = len(self._COMPRESSED)
-        out = aiohttp.FlowControlDataQueue(self.stream)
+        out = aiohttp.FlowControlDataQueue(stream)
         p = HttpPayloadParser(
             out, length=length, compression='deflate')
         p.feed_data(self._COMPRESSED)
-        self.assertEqual(b'data', b''.join(d for d, _ in out._buffer))
-        self.assertTrue(out.is_eof())
+        assert b'data' == b''.join(d for d, _ in out._buffer)
+        assert out.is_eof()
 
-    def test_http_payload_parser_deflate_no_wbits(self):
+    def test_http_payload_parser_deflate_no_wbits(self, stream):
         comp = zlib.compressobj()
         COMPRESSED = b''.join([comp.compress(b'data'), comp.flush()])
 
         length = len(COMPRESSED)
-        out = aiohttp.FlowControlDataQueue(self.stream)
+        out = aiohttp.FlowControlDataQueue(stream)
         p = HttpPayloadParser(
             out, length=length, compression='deflate')
         p.feed_data(COMPRESSED)
-        self.assertEqual(b'data', b''.join(d for d, _ in out._buffer))
-        self.assertTrue(out.is_eof())
+        assert b'data' == b''.join(d for d, _ in out._buffer)
+        assert out.is_eof()
 
-    def test_http_payload_parser_length_zero(self):
-        out = aiohttp.FlowControlDataQueue(self.stream)
+    def test_http_payload_parser_length_zero(self, stream):
+        out = aiohttp.FlowControlDataQueue(stream)
         p = HttpPayloadParser(out, length=0)
-        self.assertTrue(p.done)
-        self.assertTrue(out.is_eof())
+        assert p.done
+        assert out.is_eof()
 
     @pytest.mark.skipif(brotli is None, reason="brotli is not installed")
-    def test_http_payload_brotli(self):
+    def test_http_payload_brotli(self, stream):
         compressed = brotli.compress(b'brotli data')
-        out = aiohttp.FlowControlDataQueue(self.stream)
+        out = aiohttp.FlowControlDataQueue(stream)
         p = HttpPayloadParser(
             out, length=len(compressed), compression='br')
         p.feed_data(compressed)
-        self.assertEqual(b'brotli data', b''.join(d for d, _ in out._buffer))
-        self.assertTrue(out.is_eof())
+        assert b'brotli data' == b''.join(d for d, _ in out._buffer)
+        assert out.is_eof()
 
 
-class TestDeflateBuffer(unittest.TestCase):
+class TestDeflateBuffer:
 
-    def setUp(self):
-        self.stream = mock.Mock()
-        asyncio.set_event_loop(None)
-
-    def test_feed_data(self):
-        buf = aiohttp.FlowControlDataQueue(self.stream)
+    def test_feed_data(self, stream):
+        buf = aiohttp.FlowControlDataQueue(stream)
         dbuf = DeflateBuffer(buf, 'deflate')
 
         dbuf.decompressor = mock.Mock()
         dbuf.decompressor.decompress.return_value = b'line'
 
         dbuf.feed_data(b'data', 4)
-        self.assertEqual([b'line'], list(d for d, _ in buf._buffer))
+        assert [b'line'] == list(d for d, _ in buf._buffer)
 
-    def test_feed_data_err(self):
-        buf = aiohttp.FlowControlDataQueue(self.stream)
+    def test_feed_data_err(self, stream):
+        buf = aiohttp.FlowControlDataQueue(stream)
         dbuf = DeflateBuffer(buf, 'deflate')
 
         exc = ValueError()
         dbuf.decompressor = mock.Mock()
         dbuf.decompressor.decompress.side_effect = exc
 
-        self.assertRaises(
-            http_exceptions.ContentEncodingError, dbuf.feed_data, b'data', 4)
+        with pytest.raises(http_exceptions.ContentEncodingError):
+            dbuf.feed_data(b'data', 4)
 
-    def test_feed_eof(self):
-        buf = aiohttp.FlowControlDataQueue(self.stream)
+    def test_feed_eof(self, stream):
+        buf = aiohttp.FlowControlDataQueue(stream)
         dbuf = DeflateBuffer(buf, 'deflate')
 
         dbuf.decompressor = mock.Mock()
         dbuf.decompressor.flush.return_value = b'line'
 
         dbuf.feed_eof()
-        self.assertEqual([b'line'], list(d for d, _ in buf._buffer))
-        self.assertTrue(buf._eof)
+        assert [b'line'] == list(d for d, _ in buf._buffer)
+        assert buf._eof
 
-    def test_feed_eof_err(self):
-        buf = aiohttp.FlowControlDataQueue(self.stream)
+    def test_feed_eof_err(self, stream):
+        buf = aiohttp.FlowControlDataQueue(stream)
         dbuf = DeflateBuffer(buf, 'deflate')
 
         dbuf.decompressor = mock.Mock()
         dbuf.decompressor.flush.return_value = b'line'
         dbuf.decompressor.eof = False
 
-        self.assertRaises(http_exceptions.ContentEncodingError, dbuf.feed_eof)
+        with pytest.raises(http_exceptions.ContentEncodingError):
+            dbuf.feed_eof()
 
-    def test_empty_body(self):
-        buf = aiohttp.FlowControlDataQueue(self.stream)
+    def test_empty_body(self, stream):
+        buf = aiohttp.FlowControlDataQueue(stream)
         dbuf = DeflateBuffer(buf, 'deflate')
         dbuf.feed_eof()
 
-        self.assertTrue(buf.at_eof())
+        assert buf.at_eof()

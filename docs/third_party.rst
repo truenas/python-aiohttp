@@ -57,6 +57,9 @@ aiohttp extensions
 - `aiohttp-jinja2 <https://github.com/aio-libs/aiohttp-jinja2>`_ Jinja2
   template renderer for aiohttp.web.
 
+- `aiozipkin <https://github.com/aio-libs/aiozipkin>`_ distributed
+  tracing instrumentation for `aiohttp` client and server.
+
 Database drivers
 ^^^^^^^^^^^^^^^^
 
@@ -205,3 +208,6 @@ period ask to raise the status.
 
 - `async-v20 <https://github.com/jamespeterschinner/async_v20>`_
   Asynchronous FOREX client for OANDA's v20 API. Python 3.6+
+
+- `aiohttp-jwt <https://github.com/hzlmn/aiohttp-jwt>`_
+  An aiohttp middleware for JWT(JSON Web Token) support. Python 3.5+ is required.

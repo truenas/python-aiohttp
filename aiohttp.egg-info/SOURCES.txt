@@ -1,9 +1,12 @@
 .appveyor.yml
+.cherry_picker.toml
+.gitattributes
 .gitignore
 .pyup.yml
 .readthedocs.yml
 .travis.yml
 CHANGES.rst
+CODE_OF_CONDUCT.md
 CONTRIBUTING.rst
 CONTRIBUTORS.txt
 HISTORY.rst
@@ -13,7 +16,6 @@ Makefile
 README.rst
 codecov.yml
 pyproject.toml
-pytest.ini
 setup.cfg
 setup.py
 tox.ini
@@ -154,7 +156,6 @@ docs/whats_new_1_1.rst
 docs/whats_new_3_0.rst
 docs/_static/aiohttp-icon-128x128.png
 examples/background_tasks.py
-examples/basic_srv.py
 examples/cli_app.py
 examples/client_auth.py
 examples/client_json.py
@@ -166,7 +167,7 @@ examples/server.crt
 examples/server.csr
 examples/server.key
 examples/static_files.py
-examples/web_classview1.py
+examples/web_classview.py
 examples/web_cookies.py
 examples/web_rewrite_headers_middleware.py
 examples/web_srv.py
@@ -214,6 +215,7 @@ tests/test_http_writer.py
 tests/test_locks.py
 tests/test_loop.py
 tests/test_multipart.py
+tests/test_multipart_helpers.py
 tests/test_payload.py
 tests/test_proxy.py
 tests/test_proxy_functional.py
@@ -255,6 +257,7 @@ tools/build-wheels.sh
 tools/build.cmd
 tools/check_changes.py
 tools/drop_merged_branches.sh
+tools/fix_changelog.py
 tools/run_docker.sh
 vendor/http-parser/http_parser.c
 vendor/http-parser/.gitignore
