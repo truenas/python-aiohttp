@@ -7,7 +7,6 @@ python-aiohttp (3.1.3-1) UNRELEASED; urgency=medium
   * Standards-Version is 4.1.4 now (no changes needed)
   * Enable autopkgtest-pkg-python testsuite
   * Install examples
-  * Add python3-aiohttp.lintian-overrides for examples
   * Really bump required Python 3 version to 3.5.3
   * Enable all hardening
   * Add upstream metadata
