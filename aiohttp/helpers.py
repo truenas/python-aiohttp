@@ -36,7 +36,7 @@ PY_36 = sys.version_info >= (3, 6)
 PY_37 = sys.version_info >= (3, 7)
 
 if not PY_37:
-    from aiohttp import idna_ssl
+    import idna_ssl
     idna_ssl.patch_match_hostname()
 
 
