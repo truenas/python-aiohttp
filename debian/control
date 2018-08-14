@@ -13,7 +13,7 @@ Build-Depends: debhelper (>= 11),
                python3-sphinx,
                python3-multidict,
                python3-async-timeout,
-               python3-yarl,
+               python3-yarl (>= 1.0),
                cython3,
 # for tests:
                python3-pytest,
@@ -29,7 +29,7 @@ Testsuite: autopkgtest-pkg-python
 
 Package: python3-aiohttp
 Architecture: any
-Depends: ${misc:Depends}, ${python3:Depends}, ${shlibs:Depends}
+Depends: python3-yarl (>= 1.0), ${misc:Depends}, ${python3:Depends}, ${shlibs:Depends},
 Description: http client/server for asyncio
  HTTP Client for asyncio (PEP 3156 - Asynchronous I/O Support).
  .
