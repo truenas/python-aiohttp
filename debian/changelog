@@ -1,4 +1,4 @@
-python-aiohttp (3.4.4-1) UNRELEASED; urgency=medium
+python-aiohttp (3.4.4-1~exp1) experimental; urgency=medium
 
   * Team upload
   * New upstream release (Closes: #901010)
@@ -14,7 +14,7 @@ python-aiohttp (3.4.4-1) UNRELEASED; urgency=medium
     - Do not delete aiohttp/_*.c in override_dh_auto_clean
     - Delete _find_header.h from binary packages
 
- -- Ruben Undheim <ruben.undheim@gmail.com>  Fri, 21 Dec 2018 11:40:30 +0100
+ -- Ruben Undheim <ruben.undheim@gmail.com>  Fri, 21 Dec 2018 18:32:14 +0000
 
 python-aiohttp (3.1.3-1) unstable; urgency=medium
 
