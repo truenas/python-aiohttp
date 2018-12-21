@@ -12,7 +12,6 @@ export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 override_dh_auto_clean:
 	rm -rf .cache
 	dh_auto_clean
-	rm -f aiohttp/_*.c
 
 override_dh_strip:
 	dh_strip --no-automatic-dbgsym
