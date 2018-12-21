@@ -5,10 +5,14 @@ python-aiohttp (3.4.4-1) UNRELEASED; urgency=medium
   * debian/control:
     - New standards version 4.2.1 - no changes
     - Recommends libjs-jquery
+  * debian/gbp.conf: Enable pristine-tar build
   * debian/patches:
     - Refresh patches
     - debian/patches/0002-Use-local-install-of-jquery.patch
       (fixes lintian)
+  * debian/rules:
+    - Do not delete aiohttp/_*.c in override_dh_auto_clean
+    - Delete _find_header.h from binary packages
 
  -- Ruben Undheim <ruben.undheim@gmail.com>  Fri, 21 Dec 2018 11:40:30 +0100
 
