@@ -4,7 +4,7 @@ import string
 import zlib
 from enum import IntEnum
 
-from multidict import CIMultiDict
+from multidict import CIMultiDict, CIMultiDictProxy
 from yarl import URL
 
 from . import hdrs
@@ -324,6 +324,7 @@ class HttpParser:
         upgrade = False
         chunked = False
         raw_headers = tuple(raw_headers)
+        headers = CIMultiDictProxy(headers)
 
         # keep-alive
         conn = headers.get(hdrs.CONNECTION)
@@ -351,7 +352,7 @@ class HttpParser:
         return headers, raw_headers, close_conn, encoding, upgrade, chunked
 
 
-class HttpRequestParserPy(HttpParser):
+class HttpRequestParser(HttpParser):
     """Read request status line. Exception .http_exceptions.BadStatusLine
     could be raised in case of any errors in status line.
     Returns RawRequestMessage.
@@ -385,8 +386,8 @@ class HttpRequestParserPy(HttpParser):
             raise BadStatusLine(version)
 
         # read headers
-        headers, raw_headers, \
-            close, compression, upgrade, chunked = self.parse_headers(lines)
+        (headers, raw_headers,
+         close, compression, upgrade, chunked) = self.parse_headers(lines)
 
         if close is None:  # then the headers weren't set in the request
             if version <= HttpVersion10:  # HTTP 1.0 must asks to not close
@@ -399,7 +400,7 @@ class HttpRequestParserPy(HttpParser):
             close, compression, upgrade, chunked, URL(path))
 
 
-class HttpResponseParserPy(HttpParser):
+class HttpResponseParser(HttpParser):
     """Read response status line and headers.
 
     BadStatusLine could be raised in case of any errors in status line.
@@ -438,8 +439,8 @@ class HttpResponseParserPy(HttpParser):
             raise BadStatusLine(line)
 
         # read headers
-        headers, raw_headers, \
-            close, compression, upgrade, chunked = self.parse_headers(lines)
+        (headers, raw_headers,
+         close, compression, upgrade, chunked) = self.parse_headers(lines)
 
         if close is None:
             close = version <= HttpVersion10
@@ -661,7 +662,7 @@ class DeflateBuffer:
 
         if chunk or self.size > 0:
             self.out.feed_data(chunk, len(chunk))
-            if self.encoding != 'br' and not self.decompressor.eof:
+            if self.encoding == 'deflate' and not self.decompressor.eof:
                 raise ContentEncodingError('deflate')
 
         self.out.feed_eof()
@@ -673,12 +674,20 @@ class DeflateBuffer:
         self.out.end_http_chunk_receiving()
 
 
-HttpRequestParser = HttpRequestParserPy
-HttpResponseParser = HttpResponseParserPy
+HttpRequestParserPy = HttpRequestParser
+HttpResponseParserPy = HttpResponseParser
+RawRequestMessagePy = RawRequestMessage
+RawResponseMessagePy = RawResponseMessage
+
 try:
-    from ._http_parser import HttpRequestParserC, HttpResponseParserC
     if not NO_EXTENSIONS:  # pragma: no cover
-        HttpRequestParser = HttpRequestParserC
-        HttpResponseParser = HttpResponseParserC
+        from ._http_parser import (HttpRequestParser,  # type: ignore  # noqa
+                                   HttpResponseParser,
+                                   RawRequestMessage,
+                                   RawResponseMessage)
+        HttpRequestParserC = HttpRequestParser
+        HttpResponseParserC = HttpResponseParser
+        RawRequestMessageC = RawRequestMessage
+        RawResponseMessageC = RawResponseMessage
 except ImportError:  # pragma: no cover
     pass

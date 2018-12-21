@@ -23,10 +23,15 @@
 .vimrc
 aiohttp/_frozenlist.c
 aiohttp/_frozenlist.html
+aiohttp/_helpers.c
+aiohttp/_helpers.html
 aiohttp/_websocket.c
 aiohttp/_websocket.html
 aiohttp/_http_parser.c
 aiohttp/_http_parser.html
+aiohttp/_http_writer.c
+aiohttp/_http_writer.html
+aiohttp/_headers.html
 bin
 build
 htmlcov
@@ -51,3 +56,4 @@ virtualenv.py
 .python-version
 .pytest_cache
 .vscode
+.mypy_cache

@@ -6,7 +6,7 @@ fi
 set -euo pipefail
 # ref: https://coderwall.com/p/fkfaqq/safer-bash-scripts-with-set-euxo-pipefail
 
-PYTHON_VERSIONS="cp35-cp35m cp36-cp36m"
+PYTHON_VERSIONS="cp35-cp35m cp36-cp36m cp37-cp37m"
 
 # Avoid creation of __pycache__/*.py[c|o]
 export PYTHONDONTWRITEBYTECODE=1
@@ -24,6 +24,7 @@ echo
 echo
 echo "Compile wheels"
 for PYTHON in ${PYTHON_VERSIONS}; do
+    /opt/python/${PYTHON}/bin/pip install -r /io/requirements/cython.txt
     /opt/python/${PYTHON}/bin/pip install -r /io/requirements/wheel.txt
     /opt/python/${PYTHON}/bin/pip wheel /io/ -w /io/dist/
 done
@@ -59,6 +60,7 @@ for PYTHON in ${PYTHON_VERSIONS}; do
     echo
     echo -n "Test $PYTHON: "
     /opt/python/${PYTHON}/bin/python -c "import platform; print('Building wheel for {platform} platform.'.format(platform=platform.platform()))"
+    /opt/python/${PYTHON}/bin/pip install -r /io/requirements/cython.txt
     /opt/python/${PYTHON}/bin/pip install -r /io/requirements/ci-wheel.txt
     /opt/python/${PYTHON}/bin/pip install "$package_name" --no-index -f file:///io/dist
     /opt/python/${PYTHON}/bin/py.test /io/tests
