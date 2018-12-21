@@ -4,7 +4,11 @@ python-aiohttp (3.4.4-1) UNRELEASED; urgency=medium
   * New upstream release (Closes: #901010)
   * debian/control:
     - New standards version 4.2.1 - no changes
-  * debian/patches: Refresh patches
+    - Recommends libjs-jquery
+  * debian/patches:
+    - Refresh patches
+    - debian/patches/0002-Use-local-install-of-jquery.patch
+      (fixes lintian)
 
  -- Ruben Undheim <ruben.undheim@gmail.com>  Fri, 21 Dec 2018 11:40:30 +0100
 

@@ -1,0 +1,21 @@
+From: Ruben Undheim <ruben.undheim@gmail.com>
+Date: Fri, 21 Dec 2018 10:58:35 +0000
+Subject: Use local install of jquery
+
+---
+ examples/websocket.html | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/examples/websocket.html b/examples/websocket.html
+index 2ba9ff3..279be7d 100644
+--- a/examples/websocket.html
++++ b/examples/websocket.html
+@@ -2,7 +2,7 @@
+ <meta charset="utf-8" />
+ <html>
+ <head>
+-<script src="http://ajax.googleapis.com/ajax/libs/jquery/1.4.2/jquery.min.js">
++<script src="file:///usr/share/javascript/jquery/jquery.min.js">
+ </script>
+   <script language="javascript" type="text/javascript">
+     $(function() {
