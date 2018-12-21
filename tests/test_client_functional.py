@@ -16,6 +16,7 @@ from multidict import MultiDict
 import aiohttp
 from aiohttp import Fingerprint, ServerFingerprintMismatch, hdrs, web
 from aiohttp.abc import AbstractResolver
+from aiohttp.client_exceptions import TooManyRedirects
 from aiohttp.test_utils import unused_port
 
 
@@ -160,7 +161,7 @@ async def test_auto_header_user_agent(aiohttp_client):
     client = await aiohttp_client(app)
 
     resp = await client.get('/')
-    assert 200, resp.status
+    assert 200 == resp.status
 
 
 async def test_skip_auto_headers_user_agent(aiohttp_client):
@@ -488,6 +489,26 @@ async def test_raw_headers(aiohttp_client):
 
     raw_headers = tuple((bytes(h), bytes(v)) for h, v in resp.raw_headers)
     assert raw_headers == ((b'Content-Length', b'0'),
+                           (b'Content-Type', b'application/octet-stream'),
+                           (b'Date', mock.ANY),
+                           (b'Server', mock.ANY))
+    resp.close()
+
+
+async def test_empty_header_values(aiohttp_client):
+    async def handler(request):
+        resp = web.Response()
+        resp.headers['X-Empty'] = ''
+        return resp
+
+    app = web.Application()
+    app.router.add_route('GET', '/', handler)
+    client = await aiohttp_client(app)
+    resp = await client.get('/')
+    assert resp.status == 200
+    raw_headers = tuple((bytes(h), bytes(v)) for h, v in resp.raw_headers)
+    assert raw_headers == ((b'X-Empty', b''),
+                           (b'Content-Length', b'0'),
                            (b'Content-Type', b'application/octet-stream'),
                            (b'Date', mock.ANY),
                            (b'Server', mock.ANY))
@@ -914,10 +935,11 @@ async def test_HTTP_302_max_redirects(aiohttp_client):
     app.router.add_get(r'/redirect/{count:\d+}', redirect)
     client = await aiohttp_client(app)
 
-    resp = await client.get('/redirect/5', max_redirects=2)
-    assert 302 == resp.status
-    assert 2 == len(resp.history)
-    resp.close()
+    with pytest.raises(TooManyRedirects) as ctx:
+        await client.get('/redirect/5', max_redirects=2)
+    assert 2 == len(ctx.value.history)
+    assert ctx.value.request_info.url.path == '/redirect/5'
+    assert ctx.value.request_info.method == 'GET'
 
 
 async def test_HTTP_200_GET_WITH_PARAMS(aiohttp_client):
@@ -2030,6 +2052,33 @@ async def test_raise_for_status(aiohttp_client):
         await client.get('/')
 
 
+async def test_raise_for_status_per_request(aiohttp_client):
+
+    async def handler_redirect(request):
+        raise web.HTTPBadRequest()
+
+    app = web.Application()
+    app.router.add_route('GET', '/', handler_redirect)
+    client = await aiohttp_client(app)
+
+    with pytest.raises(aiohttp.ClientResponseError):
+        await client.get('/', raise_for_status=True)
+
+
+async def test_raise_for_status_disable_per_request(aiohttp_client):
+
+    async def handler_redirect(request):
+        raise web.HTTPBadRequest()
+
+    app = web.Application()
+    app.router.add_route('GET', '/', handler_redirect)
+    client = await aiohttp_client(app, raise_for_status=True)
+
+    resp = await client.get('/', raise_for_status=False)
+    assert 400 == resp.status
+    resp.close()
+
+
 async def test_invalid_idna():
     session = aiohttp.ClientSession()
     try:
@@ -2547,3 +2596,86 @@ async def test_async_payload_generator(aiohttp_client):
 
     resp = await client.post('/', data=gen())
     assert resp.status == 200
+
+
+async def test_read_from_closed_response(aiohttp_client):
+    async def handler(request):
+        return web.Response(body=b'data')
+
+    app = web.Application()
+    app.add_routes([web.get('/', handler)])
+
+    client = await aiohttp_client(app)
+
+    async with client.get('/') as resp:
+        assert resp.status == 200
+
+    with pytest.raises(aiohttp.ClientConnectionError):
+        await resp.read()
+
+
+async def test_read_from_closed_response2(aiohttp_client):
+    async def handler(request):
+        return web.Response(body=b'data')
+
+    app = web.Application()
+    app.add_routes([web.get('/', handler)])
+
+    client = await aiohttp_client(app)
+
+    async with client.get('/') as resp:
+        assert resp.status == 200
+        await resp.read()
+
+    with pytest.raises(aiohttp.ClientConnectionError):
+        await resp.read()
+
+
+async def test_read_from_closed_content(aiohttp_client):
+    async def handler(request):
+        return web.Response(body=b'data')
+
+    app = web.Application()
+    app.add_routes([web.get('/', handler)])
+
+    client = await aiohttp_client(app)
+
+    async with client.get('/') as resp:
+        assert resp.status == 200
+
+    with pytest.raises(aiohttp.ClientConnectionError):
+        await resp.content.readline()
+
+
+async def test_read_timeout(aiohttp_client):
+    async def handler(request):
+        await asyncio.sleep(5)
+        return web.Response()
+
+    app = web.Application()
+    app.add_routes([web.get('/', handler)])
+
+    timeout = aiohttp.ClientTimeout(sock_read=0.1)
+    client = await aiohttp_client(app, timeout=timeout)
+
+    with pytest.raises(aiohttp.ServerTimeoutError):
+        await client.get('/')
+
+
+async def test_read_timeout_on_prepared_response(aiohttp_client):
+    async def handler(request):
+        resp = aiohttp.web.StreamResponse()
+        await resp.prepare(request)
+        await asyncio.sleep(5)
+        await resp.drain()
+        return resp
+
+    app = web.Application()
+    app.add_routes([web.get('/', handler)])
+
+    timeout = aiohttp.ClientTimeout(sock_read=0.1)
+    client = await aiohttp_client(app, timeout=timeout)
+
+    with pytest.raises(aiohttp.ServerTimeoutError):
+        async with await client.get('/') as resp:
+            await resp.read()

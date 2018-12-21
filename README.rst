@@ -7,17 +7,24 @@ Async http client/server framework
    :width: 64px
    :alt: aiohttp logo
 
-.. image:: https://travis-ci.org/aio-libs/aiohttp.svg?branch=master
-   :target:  https://travis-ci.org/aio-libs/aiohttp
+|
+
+.. image:: https://travis-ci.com/aio-libs/aiohttp.svg?branch=master
+   :target: https://travis-ci.com/aio-libs/aiohttp
    :align: right
    :alt: Travis status for master branch
+
+.. image:: https://ci.appveyor.com/api/projects/status/tnddy9k6pphl8w7k/branch/master?svg=true
+   :target: https://ci.appveyor.com/project/aio-libs/aiohttp
+   :align: right
+   :alt: AppVeyor status for master branch
 
 .. image:: https://codecov.io/gh/aio-libs/aiohttp/branch/master/graph/badge.svg
    :target: https://codecov.io/gh/aio-libs/aiohttp
    :alt: codecov.io status for master branch
 
 .. image:: https://badge.fury.io/py/aiohttp.svg
-   :target: https://badge.fury.io/py/aiohttp
+   :target: https://pypi.org/project/aiohttp
    :alt: Latest PyPI package version
 
 .. image:: https://readthedocs.org/projects/aiohttp/badge/?version=latest
@@ -49,12 +56,10 @@ To retrieve something from the web:
 
   import aiohttp
   import asyncio
-  import async_timeout
 
   async def fetch(session, url):
-      async with async_timeout.timeout(10):
-          async with session.get(url) as response:
-              return await response.text()
+      async with session.get(url) as response:
+          return await response.text()
 
   async def main():
       async with aiohttp.ClientSession() as session:
@@ -85,11 +90,11 @@ This is simple usage example:
         await ws.prepare(request)
 
         async for msg in ws:
-            if msg.type == web.MsgType.text:
+            if msg.type == web.WSMsgType.text:
                 await ws.send_str("Hello, {}".format(msg.data))
-            elif msg.type == web.MsgType.binary:
+            elif msg.type == web.WSMsgType.binary:
                 await ws.send_bytes(msg.data)
-            elif msg.type == web.MsgType.close:
+            elif msg.type == web.WSMsgType.close:
                 break
 
         return ws
@@ -107,6 +112,13 @@ Documentation
 =============
 
 https://aiohttp.readthedocs.io/
+
+
+Demos
+=====
+
+https://github.com/aio-libs/aiohttp-demos
+
 
 External links
 ==============

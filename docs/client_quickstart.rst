@@ -91,7 +91,7 @@ that case you can specify multiple values for each key::
     params = [('key', 'value1'), ('key', 'value2')]
     async with session.get('http://httpbin.org/get',
                            params=params) as r:
-        expect == 'http://httpbin.org/get?key=value2&key=value1'
+        expect = 'http://httpbin.org/get?key=value2&key=value1'
         assert str(r.url) == expect
 
 You can also pass :class:`str` content as param, but beware -- content
@@ -275,7 +275,7 @@ If you want to send JSON data::
 
 To send text with appropriate content-type just use ``text`` attribute ::
 
-    async with session.post(url, text='Тест') as resp:
+    async with session.post(url, data='Тест') as resp:
         ...
 
 POST a Multipart-Encoded File
@@ -368,9 +368,7 @@ parameter and returns :class:`ClientWebSocketResponse`, with that
 object you can communicate with websocket server using response's
 methods::
 
-   session = aiohttp.ClientSession()
    async with session.ws_connect('http://example.org/ws') as ws:
-
        async for msg in ws:
            if msg.type == aiohttp.WSMsgType.TEXT:
                if msg.data == 'close cmd':
@@ -378,8 +376,6 @@ methods::
                    break
                else:
                    await ws.send_str(msg.data + '/answer')
-           elif msg.type == aiohttp.WSMsgType.CLOSED:
-               break
            elif msg.type == aiohttp.WSMsgType.ERROR:
                break
 
@@ -390,31 +386,54 @@ multiple writer tasks which can only send data asynchronously (by
 ``await ws.send_str('data')`` for example).
 
 
+.. _aiohttp-client-timeouts:
 
 Timeouts
 ========
 
-By default all IO operations have 5min timeout. The timeout may be
-overridden by passing ``timeout`` parameter into
-:meth:`ClientSession.get` and family::
+Timeout settings a stored in :class:`ClientTimeout` data structure.
 
-    async with session.get('https://github.com', timeout=60) as r:
+By default *aiohttp* uses a *total* 5min timeout, it means that the
+whole operation should finish in 5 minutes.
+
+The value could be overridden by *timeout* parameter for the session::
+
+    timeout = aiohttp.ClientTimeout(total=60)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
         ...
 
-``None`` or ``0`` disables timeout check.
+Timeout could be overridden for a request like :meth:`ClientSession.get`::
 
-The example wraps a client call in :func:`async_timeout.timeout` context
-manager, adding timeout for both connecting and response body
-reading procedures::
+    async with session.get(url, timeout=timeout) as resp:
+        ...
 
-    import async_timeout
+Supported :class:`ClientTimeout` fields are:
 
-    with async_timeout.timeout(0.001):
-        async with session.get('https://github.com') as r:
-            await r.text()
+   ``total``
 
+      The whole operation time including connection
+      establishment, request sending and response reading.
 
-.. note::
+   ``connect``
 
-   Timeout is cumulative time, it includes all operations like sending request,
-   redirects, response parsing, consuming response, etc.
+      Total timeout for acquiring a connection from pool.  The time
+      consists connection establishment for a new connection or
+      waiting for a free connection from a pool if pool connection
+      limits are exceeded.
+
+   ``sock_connect``
+
+      A timeout for connecting to a peer for a new connection, not
+      given from a pool.
+
+   ``sock_read``
+
+      The maximum allowed timeout for period between reading a new
+      data portion from a peer.
+
+All fields are floats, ``None`` or ``0`` disables a particular timeout check.
+
+Thus the default timeout is::
+
+   aiohttp.ClientTimeout(total=5*60, connect=None,
+                         sock_connect=None, sock_read=None)

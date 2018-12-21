@@ -41,8 +41,9 @@ def buf():
 
 
 @pytest.fixture
-def protocol(loop):
+def protocol(loop, transport):
     protocol = mock.Mock()
+    protocol.transport = transport
     protocol._drain_helper.return_value = loop.create_future()
     protocol._drain_helper.return_value.set_result(None)
     return protocol
@@ -103,6 +104,14 @@ def test_request_info(make_request):
     assert req.request_info == aiohttp.RequestInfo(URL('http://python.org/'),
                                                    'GET',
                                                    req.headers)
+
+
+def test_request_info_with_fragment(make_request):
+    req = make_request('get', 'http://python.org/#urlfragment')
+    assert req.request_info == aiohttp.RequestInfo(
+        URL('http://python.org/'),
+        'GET', req.headers,
+        URL('http://python.org/#urlfragment'))
 
 
 def test_version_err(make_request):
@@ -1186,7 +1195,7 @@ async def test_custom_req_rep(loop):
             conn = connection
             self.status = 123
             self.reason = 'Test OK'
-            self.headers = CIMultiDictProxy(CIMultiDict())
+            self._headers = CIMultiDictProxy(CIMultiDict())
             self.cookies = SimpleCookie()
             return
 
@@ -1201,7 +1210,6 @@ async def test_custom_req_rep(loop):
                                        continue100=self._continue,
                                        timer=self._timer,
                                        request_info=self.request_info,
-                                       auto_decompress=self._auto_decompress,
                                        traces=self._traces,
                                        loop=self.loop,
                                        session=self._session)
@@ -1210,7 +1218,7 @@ async def test_custom_req_rep(loop):
             called = True
             return resp
 
-    async def create_connection(req, traces=None):
+    async def create_connection(req, traces, timeout):
         assert isinstance(req, CustomRequest)
         return mock.Mock()
     connector = BaseConnector(loop=loop)

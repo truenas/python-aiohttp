@@ -54,7 +54,7 @@ def test_app_make_handler_debug_exc(loop, mocker, debug):
     app = web.Application(debug=debug)
     srv = mocker.patch('aiohttp.web_app.Server')
 
-    app.make_handler(loop=loop)
+    app._make_handler(loop=loop)
     srv.assert_called_with(app._handle,
                            request_factory=app._make_request,
                            access_log_class=mock.ANY,
@@ -66,7 +66,7 @@ def test_app_make_handler_args(loop, mocker):
     app = web.Application(handler_args={'test': True})
     srv = mocker.patch('aiohttp.web_app.Server')
 
-    app.make_handler(loop=loop)
+    app._make_handler(loop=loop)
     srv.assert_called_with(app._handle,
                            request_factory=app._make_request,
                            access_log_class=mock.ANY,
@@ -80,7 +80,7 @@ def test_app_make_handler_access_log_class(loop, mocker):
     app = web.Application()
 
     with pytest.raises(TypeError):
-        app.make_handler(access_log_class=Logger, loop=loop)
+        app._make_handler(access_log_class=Logger, loop=loop)
 
     class Logger(AbstractAccessLogger):
 
@@ -89,11 +89,18 @@ def test_app_make_handler_access_log_class(loop, mocker):
 
     srv = mocker.patch('aiohttp.web_app.Server')
 
-    app.make_handler(access_log_class=Logger, loop=loop)
+    app._make_handler(access_log_class=Logger, loop=loop)
     srv.assert_called_with(app._handle,
                            access_log_class=Logger,
                            request_factory=app._make_request,
                            loop=loop, debug=mock.ANY)
+
+
+def test_app_make_handler_raises_deprecation_warning(loop):
+    app = web.Application()
+
+    with pytest.warns(DeprecationWarning):
+        app.make_handler(loop=loop)
 
 
 async def test_app_register_on_finish():
@@ -125,7 +132,8 @@ async def test_app_register_coro(loop):
 
 def test_non_default_router():
     router = mock.Mock(spec=AbstractRouter)
-    app = web.Application(router=router)
+    with pytest.warns(DeprecationWarning):
+        app = web.Application(router=router)
     assert router is app.router
 
 
@@ -240,12 +248,13 @@ def test_app_run_middlewares():
     assert root._run_middlewares is True
 
 
-def test_subapp_frozen_after_adding():
+def test_subapp_pre_frozen_after_adding():
     app = web.Application()
     subapp = web.Application()
 
     app.add_subapp('/prefix', subapp)
-    assert subapp.frozen
+    assert subapp.pre_frozen
+    assert not subapp.frozen
 
 
 @pytest.mark.skipif(not PY_36,
@@ -391,3 +400,134 @@ async def test_cleanup_ctx_multiple_yields():
         await app.cleanup()
     assert "has more than one 'yield'" in str(ctx.value)
     assert out == ['pre_1', 'post_1']
+
+
+async def test_subapp_chained_config_dict_visibility(aiohttp_client):
+
+    async def main_handler(request):
+        assert request.config_dict['key1'] == 'val1'
+        assert 'key2' not in request.config_dict
+        return web.Response(status=200)
+
+    root = web.Application()
+    root['key1'] = 'val1'
+    root.add_routes([web.get('/', main_handler)])
+
+    async def sub_handler(request):
+        assert request.config_dict['key1'] == 'val1'
+        assert request.config_dict['key2'] == 'val2'
+        return web.Response(status=201)
+
+    sub = web.Application()
+    sub['key2'] = 'val2'
+    sub.add_routes([web.get('/', sub_handler)])
+    root.add_subapp('/sub', sub)
+
+    client = await aiohttp_client(root)
+
+    resp = await client.get('/')
+    assert resp.status == 200
+    resp = await client.get('/sub/')
+    assert resp.status == 201
+
+
+async def test_subapp_chained_config_dict_overriding(aiohttp_client):
+
+    async def main_handler(request):
+        assert request.config_dict['key'] == 'val1'
+        return web.Response(status=200)
+
+    root = web.Application()
+    root['key'] = 'val1'
+    root.add_routes([web.get('/', main_handler)])
+
+    async def sub_handler(request):
+        assert request.config_dict['key'] == 'val2'
+        return web.Response(status=201)
+
+    sub = web.Application()
+    sub['key'] = 'val2'
+    sub.add_routes([web.get('/', sub_handler)])
+    root.add_subapp('/sub', sub)
+
+    client = await aiohttp_client(root)
+
+    resp = await client.get('/')
+    assert resp.status == 200
+    resp = await client.get('/sub/')
+    assert resp.status == 201
+
+
+async def test_subapp_on_startup(aiohttp_client):
+
+    subapp = web.Application()
+
+    startup_called = False
+
+    async def on_startup(app):
+        nonlocal startup_called
+        startup_called = True
+        app['startup'] = True
+
+    subapp.on_startup.append(on_startup)
+
+    ctx_pre_called = False
+    ctx_post_called = False
+
+    @async_generator
+    async def cleanup_ctx(app):
+        nonlocal ctx_pre_called, ctx_post_called
+        ctx_pre_called = True
+        app['cleanup'] = True
+        await yield_(None)
+        ctx_post_called = True
+
+    subapp.cleanup_ctx.append(cleanup_ctx)
+
+    shutdown_called = False
+
+    async def on_shutdown(app):
+        nonlocal shutdown_called
+        shutdown_called = True
+
+    subapp.on_shutdown.append(on_shutdown)
+
+    cleanup_called = False
+
+    async def on_cleanup(app):
+        nonlocal cleanup_called
+        cleanup_called = True
+
+    subapp.on_cleanup.append(on_cleanup)
+
+    app = web.Application()
+
+    app.add_subapp('/subapp', subapp)
+
+    assert not startup_called
+    assert not ctx_pre_called
+    assert not ctx_post_called
+    assert not shutdown_called
+    assert not cleanup_called
+
+    assert subapp.on_startup.frozen
+    assert subapp.cleanup_ctx.frozen
+    assert subapp.on_shutdown.frozen
+    assert subapp.on_cleanup.frozen
+    assert subapp.router.frozen
+
+    client = await aiohttp_client(app)
+
+    assert startup_called
+    assert ctx_pre_called
+    assert not ctx_post_called
+    assert not shutdown_called
+    assert not cleanup_called
+
+    await client.close()
+
+    assert startup_called
+    assert ctx_pre_called
+    assert ctx_post_called
+    assert shutdown_called
+    assert cleanup_called
