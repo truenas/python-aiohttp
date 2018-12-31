@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import logging
 import os
 import platform
 import signal
@@ -13,6 +14,7 @@ from uuid import uuid4
 import pytest
 
 from aiohttp import web
+from aiohttp.helpers import PY_37
 from aiohttp.test_utils import make_mocked_coro
 
 
@@ -86,7 +88,7 @@ def stopper(loop):
     return f
 
 
-def test_run_app_http(patched_loop):
+def test_run_app_http(patched_loop) -> None:
     app = web.Application()
     startup_handler = make_mocked_coro()
     app.on_startup.append(startup_handler)
@@ -103,7 +105,7 @@ def test_run_app_http(patched_loop):
     cleanup_handler.assert_called_once_with(app)
 
 
-def test_run_app_close_loop(patched_loop):
+def test_run_app_close_loop(patched_loop) -> None:
     app = web.Application()
     web.run_app(app, print=stopper(patched_loop))
 
@@ -308,7 +310,7 @@ def test_run_app_mixed_bindings(run_app_kwargs, expected_server_calls,
             expected_server_calls)
 
 
-def test_run_app_https(patched_loop):
+def test_run_app_https(patched_loop) -> None:
     app = web.Application()
 
     ssl_context = ssl.create_default_context()
@@ -319,7 +321,8 @@ def test_run_app_https(patched_loop):
         reuse_address=None, reuse_port=None)
 
 
-def test_run_app_nondefault_host_port(patched_loop, aiohttp_unused_port):
+def test_run_app_nondefault_host_port(patched_loop,
+                                      aiohttp_unused_port) -> None:
     port = aiohttp_unused_port()
     host = '127.0.0.1'
 
@@ -332,7 +335,7 @@ def test_run_app_nondefault_host_port(patched_loop, aiohttp_unused_port):
                                                   reuse_port=None)
 
 
-def test_run_app_custom_backlog(patched_loop):
+def test_run_app_custom_backlog(patched_loop) -> None:
     app = web.Application()
     web.run_app(app, backlog=10, print=stopper(patched_loop))
 
@@ -341,7 +344,7 @@ def test_run_app_custom_backlog(patched_loop):
         reuse_address=None, reuse_port=None)
 
 
-def test_run_app_custom_backlog_unix(patched_loop):
+def test_run_app_custom_backlog_unix(patched_loop) -> None:
     app = web.Application()
     web.run_app(app, path='/tmp/tmpsock.sock',
                 backlog=10, print=stopper(patched_loop))
@@ -351,7 +354,7 @@ def test_run_app_custom_backlog_unix(patched_loop):
 
 
 @skip_if_no_unix_socks
-def test_run_app_http_unix_socket(patched_loop, shorttmpdir):
+def test_run_app_http_unix_socket(patched_loop, shorttmpdir) -> None:
     app = web.Application()
 
     sock_path = str(shorttmpdir / 'socket.sock')
@@ -364,7 +367,7 @@ def test_run_app_http_unix_socket(patched_loop, shorttmpdir):
 
 
 @skip_if_no_unix_socks
-def test_run_app_https_unix_socket(patched_loop, shorttmpdir):
+def test_run_app_https_unix_socket(patched_loop, shorttmpdir) -> None:
     app = web.Application()
 
     sock_path = str(shorttmpdir / 'socket.sock')
@@ -379,7 +382,7 @@ def test_run_app_https_unix_socket(patched_loop, shorttmpdir):
 
 @skip_if_no_unix_socks
 @skip_if_no_abstract_paths
-def test_run_app_abstract_linux_socket(patched_loop):
+def test_run_app_abstract_linux_socket(patched_loop) -> None:
     sock_path = b"\x00" + uuid4().hex.encode('ascii')
     app = web.Application()
     web.run_app(
@@ -394,7 +397,7 @@ def test_run_app_abstract_linux_socket(patched_loop):
     )
 
 
-def test_run_app_preexisting_inet_socket(patched_loop, mocker):
+def test_run_app_preexisting_inet_socket(patched_loop, mocker) -> None:
     app = web.Application()
 
     sock = socket.socket()
@@ -412,7 +415,7 @@ def test_run_app_preexisting_inet_socket(patched_loop, mocker):
 
 
 @pytest.mark.skipif(not HAS_IPV6, reason="IPv6 is not available")
-def test_run_app_preexisting_inet6_socket(patched_loop):
+def test_run_app_preexisting_inet6_socket(patched_loop) -> None:
     app = web.Application()
 
     sock = socket.socket(socket.AF_INET6)
@@ -430,7 +433,7 @@ def test_run_app_preexisting_inet6_socket(patched_loop):
 
 
 @skip_if_no_unix_socks
-def test_run_app_preexisting_unix_socket(patched_loop, mocker):
+def test_run_app_preexisting_unix_socket(patched_loop, mocker) -> None:
     app = web.Application()
 
     sock_path = '/tmp/test_preexisting_sock1'
@@ -448,7 +451,7 @@ def test_run_app_preexisting_unix_socket(patched_loop, mocker):
         assert "http://unix:{}:".format(sock_path) in printer.call_args[0][0]
 
 
-def test_run_app_multiple_preexisting_sockets(patched_loop):
+def test_run_app_multiple_preexisting_sockets(patched_loop) -> None:
     app = web.Application()
 
     sock1 = socket.socket()
@@ -478,7 +481,7 @@ web.run_app(app, host=())
 """
 
 
-def test_sigint():
+def test_sigint() -> None:
     skip_if_on_windows()
 
     proc = subprocess.Popen([sys.executable, "-u", "-c", _script_test_signal],
@@ -490,7 +493,7 @@ def test_sigint():
     assert proc.wait() == 0
 
 
-def test_sigterm():
+def test_sigterm() -> None:
     skip_if_on_windows()
 
     proc = subprocess.Popen([sys.executable, "-u", "-c", _script_test_signal],
@@ -502,7 +505,7 @@ def test_sigterm():
     assert proc.wait() == 0
 
 
-def test_startup_cleanup_signals_even_on_failure(patched_loop):
+def test_startup_cleanup_signals_even_on_failure(patched_loop) -> None:
     patched_loop.create_server = mock.Mock(side_effect=RuntimeError())
 
     app = web.Application()
@@ -518,7 +521,7 @@ def test_startup_cleanup_signals_even_on_failure(patched_loop):
     cleanup_handler.assert_called_once_with(app)
 
 
-def test_run_app_coro(patched_loop):
+def test_run_app_coro(patched_loop) -> None:
     startup_handler = cleanup_handler = None
 
     async def make_app():
@@ -538,3 +541,184 @@ def test_run_app_coro(patched_loop):
                                                   reuse_port=None)
     startup_handler.assert_called_once_with(mock.ANY)
     cleanup_handler.assert_called_once_with(mock.ANY)
+
+
+def test_run_app_default_logger(monkeypatch, patched_loop):
+    patched_loop.set_debug(True)
+    logger = web.access_logger
+    attrs = {
+        'hasHandlers.return_value': False,
+        'level': logging.NOTSET,
+        'name': 'aiohttp.access',
+    }
+    mock_logger = mock.create_autospec(logger, name='mock_access_logger')
+    mock_logger.configure_mock(**attrs)
+
+    app = web.Application()
+    web.run_app(app,
+                print=stopper(patched_loop),
+                access_log=mock_logger)
+    mock_logger.setLevel.assert_any_call(logging.DEBUG)
+    mock_logger.hasHandlers.assert_called_with()
+    assert isinstance(mock_logger.addHandler.call_args[0][0],
+                      logging.StreamHandler)
+
+
+def test_run_app_default_logger_setup_requires_debug(patched_loop):
+    patched_loop.set_debug(False)
+    logger = web.access_logger
+    attrs = {
+        'hasHandlers.return_value': False,
+        'level': logging.NOTSET,
+        'name': 'aiohttp.access',
+    }
+    mock_logger = mock.create_autospec(logger, name='mock_access_logger')
+    mock_logger.configure_mock(**attrs)
+
+    app = web.Application()
+    web.run_app(app,
+                print=stopper(patched_loop),
+                access_log=mock_logger)
+    mock_logger.setLevel.assert_not_called()
+    mock_logger.hasHandlers.assert_not_called()
+    mock_logger.addHandler.assert_not_called()
+
+
+def test_run_app_default_logger_setup_requires_default_logger(patched_loop):
+    patched_loop.set_debug(True)
+    logger = web.access_logger
+    attrs = {
+        'hasHandlers.return_value': False,
+        'level': logging.NOTSET,
+        'name': None,
+    }
+    mock_logger = mock.create_autospec(logger, name='mock_access_logger')
+    mock_logger.configure_mock(**attrs)
+
+    app = web.Application()
+    web.run_app(app,
+                print=stopper(patched_loop),
+                access_log=mock_logger)
+    mock_logger.setLevel.assert_not_called()
+    mock_logger.hasHandlers.assert_not_called()
+    mock_logger.addHandler.assert_not_called()
+
+
+def test_run_app_default_logger_setup_only_if_unconfigured(patched_loop):
+    patched_loop.set_debug(True)
+    logger = web.access_logger
+    attrs = {
+        'hasHandlers.return_value': True,
+        'level': None,
+        'name': 'aiohttp.access',
+    }
+    mock_logger = mock.create_autospec(logger, name='mock_access_logger')
+    mock_logger.configure_mock(**attrs)
+
+    app = web.Application()
+    web.run_app(app,
+                print=stopper(patched_loop),
+                access_log=mock_logger)
+    mock_logger.setLevel.assert_not_called()
+    mock_logger.hasHandlers.assert_called_with()
+    mock_logger.addHandler.assert_not_called()
+
+
+def test_run_app_cancels_all_pending_tasks(patched_loop):
+    app = web.Application()
+    task = None
+
+    async def on_startup(app):
+        nonlocal task
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(asyncio.sleep(1000))
+
+    app.on_startup.append(on_startup)
+
+    web.run_app(app, print=stopper(patched_loop))
+    assert task.cancelled()
+
+
+def test_run_app_cancels_done_tasks(patched_loop):
+    app = web.Application()
+    task = None
+
+    async def coro():
+        return 123
+
+    async def on_startup(app):
+        nonlocal task
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(coro())
+
+    app.on_startup.append(on_startup)
+
+    web.run_app(app, print=stopper(patched_loop))
+    assert task.done()
+
+
+def test_run_app_cancels_failed_tasks(patched_loop):
+    app = web.Application()
+    task = None
+
+    exc = RuntimeError("FAIL")
+
+    async def fail():
+        try:
+            await asyncio.sleep(1000)
+        except asyncio.CancelledError:
+            raise exc
+
+    async def on_startup(app):
+        nonlocal task
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(fail())
+        await asyncio.sleep(0.01)
+
+    app.on_startup.append(on_startup)
+
+    exc_handler = mock.Mock()
+    patched_loop.set_exception_handler(exc_handler)
+    web.run_app(app, print=stopper(patched_loop))
+    assert task.done()
+
+    msg = {
+        'message': 'unhandled exception during asyncio.run() shutdown',
+        'exception': exc,
+        'task': task,
+    }
+    exc_handler.assert_called_with(patched_loop, msg)
+
+
+@pytest.mark.skipif(not PY_37,
+                    reason="contextvars support is required")
+def test_run_app_context_vars(patched_loop):
+    from contextvars import ContextVar
+
+    count = 0
+    VAR = ContextVar('VAR', default='default')
+
+    async def on_startup(app):
+        nonlocal count
+        assert 'init' == VAR.get()
+        VAR.set('on_startup')
+        count += 1
+
+    async def on_cleanup(app):
+        nonlocal count
+        assert 'on_startup' == VAR.get()
+        count += 1
+
+    async def init():
+        nonlocal count
+        assert 'default' == VAR.get()
+        VAR.set('init')
+        app = web.Application()
+
+        app.on_startup.append(on_startup)
+        app.on_cleanup.append(on_cleanup)
+        count += 1
+        return app
+
+    web.run_app(init(), print=stopper(patched_loop))
+    assert count == 3

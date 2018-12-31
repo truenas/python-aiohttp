@@ -48,7 +48,10 @@ The client session supports the context manager protocol for self closing.
                          timeout=sentinel, \
                          raise_for_status=False, \
                          connector_owner=True, \
-                         auto_decompress=True, proxies=None)
+                         auto_decompress=True, \
+                         requote_redirect_url=False, \
+                         trust_env=False, \
+                         trace_configs=None)
 
    The class for creating client sessions and making requests.
 
@@ -176,6 +179,17 @@ The client session supports the context manager protocol for self closing.
 
          Added support for ``~/.netrc`` file.
 
+   :param bool requote_redirect_url: Apply *URL requoting* for redirection URLs if
+                                     automatic redirection is enabled (``True`` by
+                                     default).
+
+      .. versionadded:: 3.5
+
+   :param trace_configs: A list of :class:`TraceConfig` instances used for client
+                         tracing.  ``None`` (default) is used for request tracing
+                         disabling.  See :ref:`aiohttp-client-tracing-reference` for
+                         more information.
+
    .. attribute:: closed
 
       ``True`` if the session has been closed, ``False`` otherwise.
@@ -207,14 +221,20 @@ The client session supports the context manager protocol for self closing.
 
       .. note:: This parameter affects all subsequent requests.
 
+      .. deprecated:: 3.5
+
+         The attribute modification is deprecated.
+
    .. attribute:: loop
 
       A loop instance used for session creation.
 
       A read-only property.
 
+      .. deprecated:: 3.5
+
    .. comethod:: request(method, url, *, params=None, data=None, json=None,\
-                         headers=None, skip_auto_headers=None, \
+                         cookies=None, headers=None, skip_auto_headers=None, \
                          auth=None, allow_redirects=True,\
                          max_redirects=10,\
                          compress=None, chunked=None, expect100=False, raise_for_status=None,\
@@ -252,6 +272,14 @@ The client session supports the context manager protocol for self closing.
       :param json: Any json compatible python object
                    (optional). *json* and *data* parameters could not
                    be used at the same time.
+
+      :param dict cookies: HTTP Cookies to send with
+                           the request (optional)
+
+         Global session cookies and the explicitly set cookies will be merged
+         when sending the request.
+
+         .. versionadded:: 3.5
 
       :param dict headers: HTTP Headers to send with
                            the request (optional)
@@ -506,7 +534,8 @@ The client session supports the context manager protocol for self closing.
       :return ClientResponse: a :class:`client response
                               <ClientResponse>` object.
 
-   .. comethod:: ws_connect(url, *, protocols=(), timeout=10.0,\
+   .. comethod:: ws_connect(url, *, method='GET', \
+                            protocols=(), timeout=10.0,\
                             receive_timeout=None,\
                             auth=None,\
                             autoclose=True,\
@@ -626,6 +655,11 @@ The client session supports the context manager protocol for self closing.
 
          .. versionadded:: 3.3
 
+      :param str method: HTTP method to establish WebSocket connection,
+                         ``'GET'`` by default.
+
+         .. versionadded:: 3.5
+
 
    .. comethod:: close()
 
@@ -658,9 +692,9 @@ certification chaining.
                         allow_redirects=True, max_redirects=10, \
                         encoding='utf-8', \
                         version=HttpVersion(major=1, minor=1), \
-                        compress=None, chunked=None, expect100=False, raise_for_status=None, \
+                        compress=None, chunked=None, expect100=False, raise_for_status=False, \
                         connector=None, loop=None,\
-                        read_until_eof=True)
+                        read_until_eof=True, timeout=sentinel)
 
    :async-with:
 
@@ -718,6 +752,9 @@ certification chaining.
    :param bool read_until_eof: Read response until EOF if response
                                does not have Content-Length header.
                                ``True`` by default (optional).
+
+   :param timeout: a :class:`ClientTimeout` settings structure, 5min
+        total timeout by default.
 
    :param loop: :ref:`event loop<asyncio-event-loop>`
                 used for processing HTTP requests.
@@ -824,7 +861,7 @@ BaseConnector
 
       Read-only property.
 
-   .. method:: close()
+   .. comethod:: close()
 
       Close all opened connections.
 
@@ -1043,6 +1080,8 @@ Connection
 
       Event loop used for connection
 
+      .. deprecated:: 3.5
+
    .. attribute:: transport
 
       Connection transport
@@ -1058,13 +1097,6 @@ Connection
       Underlying socket is not closed, the connection may be reused
       later if timeout (30 seconds by default) for connection was not
       expired.
-
-   .. method:: detach()
-
-      Detach underlying socket from connection.
-
-      Underlying socket is not closed, next :meth:`close` or
-      :meth:`release` calls don't return socket to free pool.
 
 
 Response object
@@ -1108,7 +1140,7 @@ Response object
 
    .. attribute:: real_url
 
-      Unmodified URL of request (:class:`~yarl.URL`).
+      Unmodified URL of request with URL fragment unstripped (:class:`~yarl.URL`).
 
       .. versionadded:: 3.2
 
@@ -1818,13 +1850,6 @@ Response errors
       HTTP status code of response (:class:`int`), e.g. ``400``.
 
       .. deprecated:: 3.1
-
-
-.. class:: WSServerHandshakeError
-
-   Web socket server response error.
-
-   Derived from :exc:`ClientResponseError`
 
 
 .. class:: WSServerHandshakeError
