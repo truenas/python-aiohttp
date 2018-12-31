@@ -92,6 +92,7 @@ install_requires = [
     'async_timeout>=3.0,<4.0',
     'yarl>=1.0,<2.0',
     'idna-ssl>=1.0; python_version<"3.7"',
+    'typing_extensions>=3.6.5; python_version<"3.7"',
 ]
 
 
@@ -102,8 +103,11 @@ def read(f):
 NEEDS_PYTEST = {'pytest', 'test'}.intersection(sys.argv)
 pytest_runner = ['pytest-runner'] if NEEDS_PYTEST else []
 
-tests_require = ['pytest', 'gunicorn',
-                 'pytest-timeout', 'async-generator']
+tests_require = [
+    'pytest', 'gunicorn',
+    'pytest-timeout', 'async-generator',
+    'pytest-xdist',
+]
 
 
 args = dict(
@@ -147,6 +151,13 @@ args = dict(
     packages=['aiohttp'],
     python_requires='>=3.5.3',
     install_requires=install_requires,
+    extras_require={
+        'speedups': [
+            'aiodns',
+            'brotlipy',
+            'cchardet',
+        ],
+    },
     tests_require=tests_require,
     setup_requires=pytest_runner,
     include_package_data=True,

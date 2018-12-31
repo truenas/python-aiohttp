@@ -9,6 +9,7 @@ alives
 api
 api’s
 app
+apps
 app’s
 arg
 Arsenic
@@ -30,6 +31,7 @@ BaseEventLoop
 basename
 BasicAuth
 BodyPartReader
+boolean
 botocore
 Bugfixes
 builtin

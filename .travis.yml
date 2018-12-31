@@ -1,13 +1,17 @@
+conditions: v1
 version: "= 0"
+if: >  # Forbid running non-PR pushes from pyup bot
+  not (type != pull_request AND branch =~ ^pyup\-scheduled\-update\-)
 
-sudo: false
+dist: xenial
+sudo: required
 
 language: python
 
 python:
 - 3.5
-- &mainstream_python 3.6
-- 3.7-dev
+- 3.6
+- &mainstream_python 3.7
 - nightly
 - &pypy3 pypy3.5
 
@@ -17,8 +21,6 @@ install:
 - pip install -r requirements/ci.txt
 
 script:
-- make cov-ci-no-ext
-- make cov-ci-aio-debug
 - make cov-ci-run
 
 after_success:
@@ -80,7 +82,7 @@ _helpers:
     skip_cleanup: true
     # `skip-existing: true` is required to skip uploading dists, already
     # present in PYPI instead of failing the whole process.
-    # This happenes when other CI (AppVeyor etc.) has already uploaded
+    # This happens when other CI (AppVeyor etc.) has already uploaded
     # the very same dist (usually sdist).
     skip-existing: true
     user: aio-libs-bot
@@ -136,23 +138,21 @@ os: linux
 jobs:
   fast_finish: true
   allow_failures:
-  - python: 3.7-dev
   - python: nightly
 
   include:
-  - python: 3.7
-    dist: xenial
-    sudo: required
+  - name: 3.7 without extensions
+    python: 3.7
+    env:
+      AIOHTTP_NO_EXTENSIONS: 1
 
   - <<: *_doc_base
-    env:
-    - TARGET=docs
+    name: Checking docs spelling
     script:
     - make doc-spelling
 
   - <<: *_doc_base
-    env:
-    - TARGET=towncrier
+    name: Checking Towncrier fragments
     install:
     - *upgrade_python_toolset
     - pip install -r requirements/cython.txt
@@ -162,8 +162,7 @@ jobs:
     - towncrier --yes
 
   - <<: *_lint_base
-    env:
-    - TARGET=flake8
+    name: Linting source code with flake8
     install:
     - *upgrade_python_toolset
     - pip install -r requirements/flake.txt
@@ -171,14 +170,31 @@ jobs:
     - flake8 aiohttp examples tests
 
   - <<: *_lint_base
-    env:
-    - TARGET="'dist setup check'"
+    name: Linting source code with mypy
+    install:
+    - *upgrade_python_toolset
+    - pip install -r requirements/cython.txt
+    - pip install -r requirements/ci.txt
+    script:
+    - mypy aiohttp
+
+  - <<: *_lint_base
+    name: Verifying distribution package metadata
     install:
     - *upgrade_python_toolset
     - pip install -r requirements/cython.txt
     - pip install -r requirements/ci.txt -r requirements/doc.txt
     script:
-    - python setup.py check --metadata --restructuredtext --strict --verbose
+    - python setup.py check --metadata --restructuredtext --strict --verbose sdist bdist_wheel
+    - twine check dist/*
+
+  - <<: *_lint_base
+    name: Making sure that CONTRIBUTORS.txt remains sorted
+    language: minimal
+    install:
+    - skip
+    script:
+    - LC_ALL=C sort -c CONTRIBUTORS.txt
 
   - <<: *osx_python_base
     python: 3.5.3
@@ -210,8 +226,6 @@ jobs:
   - <<: *generic_deploy_base
     <<: *_reset_steps
     env: Build and deploy to PYPI of manylinux1 binary wheels for all supported Pythons and source distribution=
-    dist: trusty
-    group: edge
     services:
     - docker
     script:
