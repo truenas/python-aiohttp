@@ -26,6 +26,7 @@ tox.ini
 .github/CODEOWNERS
 .github/ISSUE_TEMPLATE.md
 .github/PULL_REQUEST_TEMPLATE.md
+CHANGES/.TEMPLATE.rst
 CHANGES/.gitignore
 aiohttp/__init__.py
 aiohttp/_cparser.pxd
@@ -182,9 +183,6 @@ tests/aiohttp.png
 tests/conftest.py
 tests/data.unknown_mime_type
 tests/hello.txt.gz
-tests/sample.crt
-tests/sample.crt.der
-tests/sample.key
 tests/test_base_protocol.py
 tests/test_classbasedview.py
 tests/test_client_connection.py
@@ -252,7 +250,6 @@ tools/build-wheels.sh
 tools/build.cmd
 tools/check_changes.py
 tools/drop_merged_branches.sh
-tools/fix_changelog.py
 tools/gen.py
 tools/run_docker.sh
 vendor/http-parser/http_parser.c
