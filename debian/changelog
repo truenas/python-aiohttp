@@ -1,9 +1,13 @@
-python-aiohttp (3.5.1-2) UNRELEASED; urgency=medium
+python-aiohttp (3.5.4-1) UNRELEASED; urgency=medium
 
+  [William Grzybowski]
+  * New upstream version 3.5.4
+
+  [Ondřej Nový]
   * Use debhelper-compat instead of debian/compat.
   * Bump Standards-Version to 4.4.0.
 
- -- Ondřej Nový <onovy@debian.org>  Sat, 20 Jul 2019 00:16:13 +0200
+ -- William Grzybowski <william@grzy.org>  Fri, 19 Jul 2019 13:48:39 -0300
 
 python-aiohttp (3.5.1-1) unstable; urgency=medium
 
