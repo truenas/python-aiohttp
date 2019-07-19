@@ -5,7 +5,7 @@ Maintainer: Debian Python Modules Team <python-modules-team@lists.alioth.debian.
 Uploaders: Tianon Gravi <admwiggin@gmail.com>,
            Paul Tagliamonte <paultag@debian.org>,
            Piotr Ożarowski <piotr@debian.org>
-Build-Depends: debhelper (>= 11),
+Build-Depends: debhelper-compat (= 11),
                dh-python,
                python3-all-dev (>= 3.5.3~),
                python3-all-dbg (>= 3.5.3~),
