@@ -4,7 +4,9 @@ python-aiohttp (3.5.4-1) UNRELEASED; urgency=medium
   * New upstream version 3.5.4
   * Add debian/salsa-ci.yml
   * d/control: add myself to Uploaders
+  * d/control: update debhelper to version 12
   * d/copyright: adjust upstream years and remove debian/idna_ssl.py
+  * d/rules: run dwz only in the debug package
   * Remove header files using pyremove and not rules
 
   [ Ondřej Nový ]
