@@ -1,16 +1,13 @@
 python-aiohttp (3.5.4-1) UNRELEASED; urgency=medium
 
   [ William Grzybowski ]
-  [William Grzybowski]
   * New upstream version 3.5.4
   * d/control: add myself to Uploaders
   * d/copyright: adjust upstream years and remove debian/idna_ssl.py
 
-  [Ondřej Nový]
+  [ Ondřej Nový ]
   * Use debhelper-compat instead of debian/compat.
   * Bump Standards-Version to 4.4.0.
-
-  [ Ondřej Nový ]
   * d/control: Remove ancient X-Python3-Version field.
 
  -- William Grzybowski <william@grzy.org>  Fri, 19 Jul 2019 13:48:39 -0300
