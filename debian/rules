@@ -16,11 +16,6 @@ override_dh_auto_clean:
 override_dh_strip:
 	dh_strip --no-automatic-dbgsym
 
-override_dh_install:
-	dh_install
-	$(RM) debian/python3-aiohttp-dbg/usr/lib/python3*/dist-packages/aiohttp/_find_header.h
-	$(RM) debian/python3-aiohttp/usr/lib/python3*/dist-packages/aiohttp/_find_header.h
-
 override_dh_auto_test:
 	# disable tests for now:
 	# https://bugs.python.org/issue28634 needs to be fixed in Debian

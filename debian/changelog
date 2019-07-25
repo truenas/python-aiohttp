@@ -4,6 +4,7 @@ python-aiohttp (3.5.4-1) UNRELEASED; urgency=medium
   * New upstream version 3.5.4
   * d/control: add myself to Uploaders
   * d/copyright: adjust upstream years and remove debian/idna_ssl.py
+  * Remove header files using pyremove and not rules
 
   [ Ondřej Nový ]
   * Use debhelper-compat instead of debian/compat.
