@@ -1,4 +1,4 @@
-python-aiohttp (3.5.4-1) UNRELEASED; urgency=medium
+python-aiohttp (3.5.4-1) unstable; urgency=medium
 
   [ William Grzybowski ]
   * New upstream version 3.5.4
@@ -15,7 +15,7 @@ python-aiohttp (3.5.4-1) UNRELEASED; urgency=medium
   * Bump Standards-Version to 4.4.0.
   * d/control: Remove ancient X-Python3-Version field.
 
- -- William Grzybowski <william@grzy.org>  Fri, 19 Jul 2019 13:48:39 -0300
+ -- William Grzybowski <william@grzy.org>  Fri, 26 Jul 2019 16:17:15 -0300
 
 python-aiohttp (3.5.1-1) unstable; urgency=medium
 
