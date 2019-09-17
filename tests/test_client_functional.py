@@ -1919,6 +1919,50 @@ async def test_cookies_per_request(aiohttp_client) -> None:
     resp.close()
 
 
+async def test_cookies_redirect(aiohttp_client) -> None:
+
+    async def redirect1(request):
+        ret = web.Response(status=301, headers={'Location': '/redirect2'})
+        ret.set_cookie('c', '1')
+        return ret
+
+    async def redirect2(request):
+        ret = web.Response(status=301, headers={'Location': '/'})
+        ret.set_cookie('c', '2')
+        return ret
+
+    async def handler(request):
+        assert request.cookies.keys() == {'c'}
+        assert request.cookies['c'] == '2'
+        return web.Response()
+
+    app = web.Application()
+    app.router.add_get('/redirect1', redirect1)
+    app.router.add_get('/redirect2', redirect2)
+    app.router.add_get('/', handler)
+
+    client = await aiohttp_client(app)
+    resp = await client.get('/redirect1')
+    assert 200 == resp.status
+    resp.close()
+
+
+async def test_cookies_on_empty_session_jar(aiohttp_client) -> None:
+    async def handler(request):
+        assert 'custom-cookie' in request.cookies
+        assert request.cookies['custom-cookie'] == 'abc'
+        return web.Response()
+
+    app = web.Application()
+    app.router.add_get('/', handler)
+    client = await aiohttp_client(
+        app, cookies=None)
+
+    resp = await client.get('/', cookies={'custom-cookie': 'abc'})
+    assert 200 == resp.status
+    resp.close()
+
+
 async def test_morsel_with_attributes(aiohttp_client) -> None:
     # A comment from original test:
     #
@@ -2337,6 +2381,24 @@ async def test_aiohttp_request_context_manager(aiohttp_server) -> None:
     async with aiohttp.request('GET', server.make_url('/')) as resp:
         await resp.read()
         assert resp.status == 200
+
+
+async def test_aiohttp_request_ctx_manager_close_sess_on_error(
+        ssl_ctx, aiohttp_server) -> None:
+    async def handler(request):
+        return web.Response()
+
+    app = web.Application()
+    app.router.add_get('/', handler)
+    server = await aiohttp_server(app, ssl=ssl_ctx)
+
+    cm = aiohttp.request('GET', server.make_url('/'))
+
+    with pytest.raises(aiohttp.ClientConnectionError):
+        async with cm:
+            pass
+
+    assert cm._session.closed
 
 
 async def test_aiohttp_request_ctx_manager_not_found() -> None:
