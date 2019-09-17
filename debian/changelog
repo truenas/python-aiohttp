@@ -1,3 +1,10 @@
+python-aiohttp (3.6.0-1) unstable; urgency=medium
+
+  * New upstream release
+  * d/watch: use version 4 and ignore alpha/beta/rc
+
+ -- William Grzybowski <william@grzy.org>  Tue, 17 Sep 2019 14:38:53 -0300
+
 python-aiohttp (3.5.4-1) unstable; urgency=medium
 
   [ William Grzybowski ]
