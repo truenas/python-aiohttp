@@ -1,12 +1,17 @@
 import hashlib
 import pathlib
-import platform
 import shutil
 import ssl
 import tempfile
+import uuid
 
 import pytest
-import trustme
+
+try:
+    import trustme
+    TRUSTME = True
+except ImportError:
+    TRUSTME = False
 
 pytest_plugins = ['aiohttp.pytest_plugin', 'pytester']
 
@@ -23,8 +28,7 @@ def shorttmpdir():
 
 @pytest.fixture
 def tls_certificate_authority():
-    if (platform.system() == 'Linux' and
-            platform.architecture() == ('32bit', 'ELF')):
+    if not TRUSTME:
         pytest.xfail("trustme fails on 32bit Linux")
     return trustme.CA()
 
@@ -73,3 +77,9 @@ def tls_certificate_pem_bytes(tls_certificate):
 def tls_certificate_fingerprint_sha256(tls_certificate_pem_bytes):
     tls_cert_der = ssl.PEM_cert_to_DER_cert(tls_certificate_pem_bytes.decode())
     return hashlib.sha256(tls_cert_der).digest()
+
+
+@pytest.fixture
+def pipe_name():
+    name = r'\\.\pipe\{}'.format(uuid.uuid4().hex)
+    return name
