@@ -52,6 +52,7 @@ __all__ = ('BasicAuth', 'ChainMapProxy')
 
 PY_36 = sys.version_info >= (3, 6)
 PY_37 = sys.version_info >= (3, 7)
+PY_38 = sys.version_info >= (3, 8)
 
 if not PY_37:
     import idna_ssl
@@ -449,8 +450,8 @@ def is_ip_address(
     return is_ipv4_address(host) or is_ipv6_address(host)
 
 
-_cached_current_datetime = None
-_cached_formatted_datetime = None
+_cached_current_datetime = None  # type: Optional[int]
+_cached_formatted_datetime = ""
 
 
 def rfc822_formatted_time() -> str:
@@ -467,12 +468,12 @@ def rfc822_formatted_time() -> str:
                       "Jan", "Feb", "Mar", "Apr", "May", "Jun",
                       "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
-        year, month, day, hh, mm, ss, wd, y, z = time.gmtime(now)  # type: ignore  # noqa
+        year, month, day, hh, mm, ss, wd, *tail = time.gmtime(now)
         _cached_formatted_datetime = "%s, %02d %3s %4d %02d:%02d:%02d GMT" % (
             _weekdayname[wd], day, _monthname[month], year, hh, mm, ss
         )
         _cached_current_datetime = now
-    return _cached_formatted_datetime  # type: ignore
+    return _cached_formatted_datetime
 
 
 def _weakref_handle(info):  # type: ignore

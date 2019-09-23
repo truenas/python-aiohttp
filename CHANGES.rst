@@ -14,6 +14,39 @@ Changelog
 
 .. towncrier release notes start
 
+3.6.1 (2019-09-19)
+==================
+
+Features
+--------
+
+- Compatibility with Python 3.8.
+  `#4056 <https://github.com/aio-libs/aiohttp/issues/4056>`_
+
+
+Bugfixes
+--------
+
+- correct some exception string format
+  `#4068 <https://github.com/aio-libs/aiohttp/issues/4068>`_
+- Emit a warning when ``ssl.OP_NO_COMPRESSION`` is
+  unavailable because the runtime is built against
+  an outdated OpenSSL.
+  `#4052 <https://github.com/aio-libs/aiohttp/issues/4052>`_
+- Update multidict requirement to >= 4.5
+  `#4057 <https://github.com/aio-libs/aiohttp/issues/4057>`_
+
+
+Improved Documentation
+----------------------
+
+- Provide pytest-aiohttp namespace for pytest fixtures in docs.
+  `#3723 <https://github.com/aio-libs/aiohttp/issues/3723>`_
+
+
+----
+
+
 3.6.0 (2019-09-06)
 ==================
 
@@ -56,14 +89,14 @@ Bugfixes
   `#3631 <https://github.com/aio-libs/aiohttp/issues/3631>`_
 - Use correct type for add_view and family
   `#3633 <https://github.com/aio-libs/aiohttp/issues/3633>`_
-- Fix _keepalive field in __slots__ of web_protocol.RequestHandler.
+- Fix _keepalive field in __slots__ of ``RequestHandler``.
   `#3644 <https://github.com/aio-libs/aiohttp/issues/3644>`_
 - Properly handle ConnectionResetError, to silence the "Cannot write to closing
   transport" exception when clients disconnect uncleanly.
   `#3648 <https://github.com/aio-libs/aiohttp/issues/3648>`_
-- Suppress pytest warnings due to test util classes
+- Suppress pytest warnings due to ``test_utils`` classes
   `#3660 <https://github.com/aio-libs/aiohttp/issues/3660>`_
-- Fix overshadowing of overlapped subbaps prefixes.
+- Fix overshadowing of overlapped sub-application prefixes.
   `#3701 <https://github.com/aio-libs/aiohttp/issues/3701>`_
 - Fixed return type annotation for WSMessage.json()
   `#3720 <https://github.com/aio-libs/aiohttp/issues/3720>`_
@@ -81,7 +114,7 @@ Bugfixes
   `#3906 <https://github.com/aio-libs/aiohttp/issues/3906>`_
 - Add URL to the string representation of ClientResponseError.
   `#3959 <https://github.com/aio-libs/aiohttp/issues/3959>`_
-- Accept istr keys in LooseHeaders type hints.
+- Accept ``istr`` keys in ``LooseHeaders`` type hints.
   `#3976 <https://github.com/aio-libs/aiohttp/issues/3976>`_
 - Fixed race conditions in _resolve_host caching and throttling when tracing is enabled.
   `#4013 <https://github.com/aio-libs/aiohttp/issues/4013>`_
