@@ -29,7 +29,7 @@ Testsuite: autopkgtest-pkg-python
 
 Package: python3-aiohttp
 Architecture: any
-Depends: python3-yarl (>= 1.0), ${misc:Depends}, ${python3:Depends}, ${shlibs:Depends},
+Depends: python3-yarl (>= 1.0), ${misc:Depends}, ${python3:Depends}, ${shlibs:Depends}, ${sphinxdoc:Depends}
 Recommends: libjs-jquery
 Description: http client/server for asyncio
  HTTP Client for asyncio (PEP 3156 - Asynchronous I/O Support).
