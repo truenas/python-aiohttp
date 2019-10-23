@@ -1,6 +1,7 @@
 """HTTP client functional tests against aiohttp.web server"""
 
 import asyncio
+import datetime
 import http.cookies
 import io
 import json
@@ -595,6 +596,56 @@ async def test_timeout_on_session_read_timeout(aiohttp_client, mocker) -> None:
 
     with pytest.raises(asyncio.TimeoutError):
         await client.get('/')
+
+
+async def test_read_timeout_between_chunks(aiohttp_client, mocker) -> None:
+    mocker.patch('aiohttp.helpers.ceil').side_effect = ceil
+
+    async def handler(request):
+        resp = aiohttp.web.StreamResponse()
+        await resp.prepare(request)
+        # write data 4 times, with pauses. Total time 0.4 seconds.
+        for _ in range(4):
+            await asyncio.sleep(0.1)
+            await resp.write(b'data\n')
+        return resp
+
+    app = web.Application()
+    app.add_routes([web.get('/', handler)])
+
+    # A timeout of 0.2 seconds should apply per read.
+    timeout = aiohttp.ClientTimeout(sock_read=0.2)
+    client = await aiohttp_client(app, timeout=timeout)
+
+    res = b''
+    async with await client.get('/') as resp:
+        res += await resp.read()
+
+    assert res == b'data\n' * 4
+
+
+async def test_read_timeout_on_reading_chunks(aiohttp_client, mocker) -> None:
+    mocker.patch('aiohttp.helpers.ceil').side_effect = ceil
+
+    async def handler(request):
+        resp = aiohttp.web.StreamResponse()
+        await resp.prepare(request)
+        await resp.write(b'data\n')
+        await asyncio.sleep(1)
+        await resp.write(b'data\n')
+        return resp
+
+    app = web.Application()
+    app.add_routes([web.get('/', handler)])
+
+    # A timeout of 0.2 seconds should apply per read.
+    timeout = aiohttp.ClientTimeout(sock_read=0.2)
+    client = await aiohttp_client(app, timeout=timeout)
+
+    async with await client.get('/') as resp:
+        assert (await resp.content.read(5)) == b'data\n'
+        with pytest.raises(asyncio.TimeoutError):
+            await resp.content.read()
 
 
 async def test_timeout_on_reading_data(aiohttp_client, mocker) -> None:
@@ -2018,6 +2069,86 @@ async def test_set_cookies(aiohttp_client) -> None:
 
         m_log.warning.assert_called_with('Can not load response cookies: %s',
                                          mock.ANY)
+
+
+async def test_set_cookies_expired(aiohttp_client) -> None:
+
+    async def handler(request):
+        ret = web.Response()
+        ret.set_cookie('c1', 'cookie1')
+        ret.set_cookie('c2', 'cookie2')
+        ret.headers.add('Set-Cookie',
+                        'c3=cookie3; '
+                        'HttpOnly; Path=/'
+                        " Expires=Tue, 1 Jan 1980 12:00:00 GMT; ")
+        return ret
+
+    app = web.Application()
+    app.router.add_get('/', handler)
+    client = await aiohttp_client(app)
+
+    resp = await client.get('/')
+    assert 200 == resp.status
+    cookie_names = {c.key for c in client.session.cookie_jar}
+    assert cookie_names == {'c1', 'c2'}
+    resp.close()
+
+
+async def test_set_cookies_max_age(aiohttp_client) -> None:
+
+    async def handler(request):
+        ret = web.Response()
+        ret.set_cookie('c1', 'cookie1')
+        ret.set_cookie('c2', 'cookie2')
+        ret.headers.add('Set-Cookie',
+                        'c3=cookie3; '
+                        'HttpOnly; Path=/'
+                        " Max-Age=1; ")
+        return ret
+
+    app = web.Application()
+    app.router.add_get('/', handler)
+    client = await aiohttp_client(app)
+
+    resp = await client.get('/')
+    assert 200 == resp.status
+    cookie_names = {c.key for c in client.session.cookie_jar}
+    assert cookie_names == {'c1', 'c2', 'c3'}
+    await asyncio.sleep(2)
+    cookie_names = {c.key for c in client.session.cookie_jar}
+    assert cookie_names == {'c1', 'c2'}
+    resp.close()
+
+
+async def test_set_cookies_max_age_overflow(aiohttp_client) -> None:
+
+    async def handler(request):
+        ret = web.Response()
+        ret.headers.add('Set-Cookie',
+                        'overflow=overflow; '
+                        'HttpOnly; Path=/'
+                        " Max-Age=" + str(overflow) + "; ")
+        return ret
+
+    overflow = int(datetime.datetime.max.replace(
+        tzinfo=datetime.timezone.utc).timestamp())
+    empty = None
+    try:
+        empty = (datetime.datetime.now(datetime.timezone.utc) +
+                 datetime.timedelta(seconds=overflow))
+    except OverflowError as ex:
+        assert isinstance(ex, OverflowError)
+    assert not isinstance(empty, datetime.datetime)
+    app = web.Application()
+    app.router.add_get('/', handler)
+    client = await aiohttp_client(app)
+
+    resp = await client.get('/')
+    assert 200 == resp.status
+    for cookie in client.session.cookie_jar:
+        if cookie.key == 'overflow':
+            assert int(cookie['max-age']) == int(overflow)
+    resp.close()
 
 
 async def test_request_conn_error() -> None:
