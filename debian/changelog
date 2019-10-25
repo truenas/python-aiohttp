@@ -8,6 +8,7 @@ python-aiohttp (3.6.2-1) unstable; urgency=medium
   * d/control:
     - Add sphinxdoc to package Depends
     - Update Standards-Version to 4.4.1
+  * d/patches: add patch 0002 to add shebang to examples
 
  -- William Grzybowski <william@grzy.org>  Wed, 23 Oct 2019 09:51:01 -0300
 
