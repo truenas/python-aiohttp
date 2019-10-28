@@ -6,6 +6,7 @@ python-aiohttp (3.6.2-1) unstable; urgency=medium
   [ William Grzybowski ]
   * New upstream release
   * d/control:
+    - Add Rules-Requires-Root: no
     - Add sphinxdoc to package Depends
     - Update Standards-Version to 4.4.1
   * d/patches: add patch 0002 to add shebang to examples
