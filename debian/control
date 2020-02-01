@@ -53,3 +53,17 @@ Description: http client/server for asyncio - debug version
   * web-server has middlewares and pluggable routing.
  .
  This package contains the extension built for the Python 3 debug interpreter.
+
+Package: python-aiohttp-doc
+Architecture: all
+Section: doc
+Depends: ${misc:Depends}
+Description: documentation of python3-aiohttp
+ HTTP Client for asyncio (PEP 3156 - Asynchronous I/O Support).
+ .
+ Features:
+  * supports both client and server side of HTTP protocol,
+  * supports both client and server Web-Sockets out-of-the-box,
+  * web-server has middlewares and pluggable routing.
+ .
+ This package provides HTML documentation for aiohttp.

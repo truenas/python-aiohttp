@@ -1,0 +1,9 @@
+Document: python-aiohttp-doc
+Title: python-aiohttp Documetantion
+Author: Nikolay Kim and Andrew Svetlov
+Abstract: HTTP Client for asyncio (PEP 3156 - Asynchronous I/O Support)
+Section: Programming/Python
+
+Format: HTML
+Index: /usr/share/doc/python-aiohttp-doc/html/index.html
+Files: /usr/share/doc/python-aiohttp-doc/html/*.html
