@@ -9,9 +9,10 @@ export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 %:
 	dh $@ --with python3,sphinxdoc --buildsystem pybuild
 
-override_dh_build:
-	dh_auto_build
+override_dh_auto_build:
+	sed -i -e '/sphinxcontrib.asyncio/d' -e '/aiohttp_theme/d' docs/conf.py
 	${MAKE} -C docs html
+	dh_auto_build
 
 override_dh_auto_clean:
 	rm -rf .cache
