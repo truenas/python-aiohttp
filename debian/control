@@ -1,7 +1,7 @@
 Source: python-aiohttp
 Section: python
 Priority: optional
-Maintainer: Debian Python Modules Team <python-modules-team@lists.alioth.debian.org>
+Maintainer: Debian Python Team <team+python@tracker.debian.org>
 Uploaders: Tianon Gravi <admwiggin@gmail.com>,
            Paul Tagliamonte <paultag@debian.org>,
            Piotr Ożarowski <piotr@debian.org>,
