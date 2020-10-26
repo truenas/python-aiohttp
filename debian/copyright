@@ -1,5 +1,6 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Source: https://github.com/aio-libs/aiohttp
+Upstream-Name: aiohttp
 
 Files: *
 Copyright: 2013-2019 Nikolay Kim and Andrew Svetlov

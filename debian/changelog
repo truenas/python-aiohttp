@@ -13,6 +13,9 @@ python-aiohttp (3.6.2-2) UNRELEASED; urgency=medium
   * d/control: Update Vcs-* fields with new Debian Python Team Salsa
     layout.
 
+  [ Debian Janitor ]
+  * Set field Upstream-Name in debian/copyright.
+
  -- Emmanuel Arias <eamanu@yaerobi.com>  Sat, 01 Feb 2020 00:00:49 -0300
 
 python-aiohttp (3.6.2-1) unstable; urgency=medium
