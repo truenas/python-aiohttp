@@ -1,6 +1,5 @@
 Bug-Database: https://github.com/aio-libs/aiohttp/issues
 Bug-Submit: https://github.com/aio-libs/aiohttp/issues/new
 Changelog: https://github.com/aio-libs/aiohttp/blob/master/CHANGES.rst
-Name: aiohttp
 Repository: https://github.com/aio-libs/aiohttp.git
 Repository-Browse: https://github.com/aio-libs/aiohttp
