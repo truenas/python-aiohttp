@@ -4,7 +4,7 @@ python-aiohttp (3.7.3-1) unstable; urgency=medium
   * Add python-aiohttp-doc package (Closes: #950331)
     - Add d/python-aiohttp-doc* files.
     - d/rules: add override_dh_auto_build for build documentation.
-    - d/control: add python3-sphinxcontrib.blockdiag depdends for build
+    - d/control: add python3-sphinxcontrib.blockdiag depends for build
       documentation.
 
   [ Ondřej Nový ]
