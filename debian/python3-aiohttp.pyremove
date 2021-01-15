@@ -3,3 +3,4 @@
 */*.pyd
 */*.pyi
 */*.pyx
+aiohttp/.hash
