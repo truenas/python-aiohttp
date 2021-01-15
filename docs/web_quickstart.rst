@@ -221,7 +221,7 @@ Routes can also be given a *name*::
 Which can then be used to access and build a *URL* for that resource later (e.g.
 in a :ref:`request handler <aiohttp-web-handler>`)::
 
-   url == request.app.router['root'].url_for().with_query({"a": "b", "c": "d"})
+   url = request.app.router['root'].url_for().with_query({"a": "b", "c": "d"})
    assert url == URL('/root?a=b&c=d')
 
 A more interesting example is building *URLs* for :ref:`variable
@@ -269,7 +269,7 @@ application developers can organize handlers in classes if they so wish::
 
    handler = Handler()
    app.add_routes([web.get('/intro', handler.handle_intro),
-                   web.get('/greet/{name}', handler.handle_greeting)]
+                   web.get('/greet/{name}', handler.handle_greeting)])
 
 
 .. _aiohttp-web-class-based-views:
