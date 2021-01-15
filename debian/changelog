@@ -20,6 +20,7 @@ python-aiohttp (3.7.3-1) unstable; urgency=medium
 
   [ Piotr Ożarowski ]
   * New upstream release
+  * Patch documentation to remove "fork me on Github" button (privacy breach)
 
  -- Piotr Ożarowski <piotr@debian.org>  Fri, 15 Jan 2021 20:52:09 +0100
 

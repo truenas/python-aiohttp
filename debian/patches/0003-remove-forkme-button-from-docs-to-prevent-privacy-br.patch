@@ -1,0 +1,24 @@
+From: =?utf-8?q?Piotr_O=C5=BCarowski?= <piotr@debian.org>
+Date: Fri, 15 Jan 2021 20:56:21 +0100
+Subject: remove forkme button from docs to prevent privacy breach
+
+---
+ docs/conf.py | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/docs/conf.py b/docs/conf.py
+index 6532648..120469c 100644
+--- a/docs/conf.py
++++ b/docs/conf.py
+@@ -151,9 +151,9 @@ html_theme_options = {
+     "canonical_url": "http://docs.aiohttp.org/en/stable/",
+     "github_user": "aio-libs",
+     "github_repo": "aiohttp",
+-    "github_button": True,
++    "github_button": False,
+     "github_type": "star",
+-    "github_banner": True,
++    "github_banner": False,
+     "badges": [
+         {
+             "image": "https://github.com/aio-libs/aiohttp/workflows/CI/badge.svg",
