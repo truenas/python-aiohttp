@@ -262,7 +262,6 @@ const struct message requests[] =
   ,.type= HTTP_REQUEST
   ,.raw= "POST /post_identity_body_world?q=search#hey HTTP/1.1\r\n"
          "Accept: */*\r\n"
-         "Transfer-Encoding: identity\r\n"
          "Content-Length: 5\r\n"
          "\r\n"
          "World"
@@ -275,10 +274,9 @@ const struct message requests[] =
   ,.fragment= "hey"
   ,.request_path= "/post_identity_body_world"
   ,.request_url= "/post_identity_body_world?q=search#hey"
-  ,.num_headers= 3
+  ,.num_headers= 2
   ,.headers=
     { { "Accept", "*/*" }
-    , { "Transfer-Encoding", "identity" }
     , { "Content-Length", "5" }
     }
   ,.body= "World"
@@ -1173,6 +1171,81 @@ const struct message requests[] =
   ,.headers= { { "Host", "example.com" } }
   ,.body= ""
   }
+
+#define SOURCE_ICE_REQUEST 42
+, {.name = "source request"
+  ,.type= HTTP_REQUEST
+  ,.raw= "SOURCE /music/sweet/music ICE/1.0\r\n"
+         "Host: example.com\r\n"
+         "\r\n"
+  ,.should_keep_alive= FALSE
+  ,.message_complete_on_eof= FALSE
+  ,.http_major= 1
+  ,.http_minor= 0
+  ,.method= HTTP_SOURCE
+  ,.request_path= "/music/sweet/music"
+  ,.request_url= "/music/sweet/music"
+  ,.query_string= ""
+  ,.fragment= ""
+  ,.num_headers= 1
+  ,.headers= { { "Host", "example.com" } }
+  ,.body= ""
+  }
+
+#define POST_MULTI_TE_LAST_CHUNKED 43
+, {.name= "post - multi coding transfer-encoding chunked body"
+  ,.type= HTTP_REQUEST
+  ,.raw= "POST / HTTP/1.1\r\n"
+         "Transfer-Encoding: deflate, chunked\r\n"
+         "\r\n"
+         "1e\r\nall your base are belong to us\r\n"
+         "0\r\n"
+         "\r\n"
+  ,.should_keep_alive= TRUE
+  ,.message_complete_on_eof= FALSE
+  ,.http_major= 1
+  ,.http_minor= 1
+  ,.method= HTTP_POST
+  ,.query_string= ""
+  ,.fragment= ""
+  ,.request_path= "/"
+  ,.request_url= "/"
+  ,.num_headers= 1
+  ,.headers=
+    { { "Transfer-Encoding" , "deflate, chunked" }
+    }
+  ,.body= "all your base are belong to us"
+  ,.num_chunks_complete= 2
+  ,.chunk_lengths= { 0x1e }
+  }
+
+#define POST_MULTI_LINE_TE_LAST_CHUNKED 44
+, {.name= "post - multi line coding transfer-encoding chunked body"
+  ,.type= HTTP_REQUEST
+  ,.raw= "POST / HTTP/1.1\r\n"
+         "Transfer-Encoding: deflate,\r\n"
+         " chunked\r\n"
+         "\r\n"
+         "1e\r\nall your base are belong to us\r\n"
+         "0\r\n"
+         "\r\n"
+  ,.should_keep_alive= TRUE
+  ,.message_complete_on_eof= FALSE
+  ,.http_major= 1
+  ,.http_minor= 1
+  ,.method= HTTP_POST
+  ,.query_string= ""
+  ,.fragment= ""
+  ,.request_path= "/"
+  ,.request_url= "/"
+  ,.num_headers= 1
+  ,.headers=
+    { { "Transfer-Encoding" , "deflate, chunked" }
+    }
+  ,.body= "all your base are belong to us"
+  ,.num_chunks_complete= 2
+  ,.chunk_lengths= { 0x1e }
+  }
 };
 
 /* * R E S P O N S E S * */
@@ -1949,6 +2022,28 @@ const struct message responses[] =
     }
   ,.num_chunks_complete= 3
   ,.chunk_lengths= { 2, 2 }
+  }
+#define HTTP_200_MULTI_TE_NOT_LAST_CHUNKED 28
+, {.name= "HTTP 200 response with `chunked` being *not last* Transfer-Encoding"
+  ,.type= HTTP_RESPONSE
+  ,.raw= "HTTP/1.1 200 OK\r\n"
+         "Transfer-Encoding: chunked, identity\r\n"
+         "\r\n"
+         "2\r\n"
+         "OK\r\n"
+         "0\r\n"
+         "\r\n"
+  ,.should_keep_alive= FALSE
+  ,.message_complete_on_eof= TRUE
+  ,.http_major= 1
+  ,.http_minor= 1
+  ,.status_code= 200
+  ,.response_status= "OK"
+  ,.num_headers= 1
+  ,.headers= { { "Transfer-Encoding", "chunked, identity" }
+             }
+  ,.body= "2\r\nOK\r\n0\r\n\r\n"
+  ,.num_chunks_complete= 0
   }
 };
 
@@ -3643,7 +3738,7 @@ test_chunked_content_length_error (int req)
   parsed = http_parser_execute(&parser, &settings_null, buf, strlen(buf));
   assert(parsed == strlen(buf));
 
-  buf = "Transfer-Encoding: chunked\r\nContent-Length: 1\r\n\r\n";
+  buf = "Transfer-Encoding: anything\r\nContent-Length: 1\r\n\r\n";
   size_t buflen = strlen(buf);
 
   parsed = http_parser_execute(&parser, &settings_null, buf, buflen);
@@ -4126,6 +4221,7 @@ main (void)
   printf("http_parser v%u.%u.%u (0x%06lx)\n", major, minor, patch, version);
 
   printf("sizeof(http_parser) = %u\n", (unsigned int)sizeof(http_parser));
+  assert(sizeof(http_parser) == 4 + 4 + 8 + 2 + 2 + 4 + sizeof(void *));
 
   //// API
   test_preserve_data();
@@ -4164,6 +4260,13 @@ main (void)
 
   test_simple_type(
       "POST / HTTP/1.1\r\n"
+      "Content-Length:\r\n"  // empty
+      "\r\n",
+      HPE_INVALID_CONTENT_LENGTH,
+      HTTP_REQUEST);
+
+  test_simple_type(
+      "POST / HTTP/1.1\r\n"
       "Content-Length:  42 \r\n"  // Note the surrounding whitespace.
       "\r\n",
       HPE_OK,
@@ -4181,6 +4284,20 @@ main (void)
       "Content-Length: 13 37\r\n"
       "\r\n",
       HPE_INVALID_CONTENT_LENGTH,
+      HTTP_REQUEST);
+
+  test_simple_type(
+      "POST / HTTP/1.1\r\n"
+      "Content-Length:  42\r\n"
+      " Hello world!\r\n",
+      HPE_INVALID_CONTENT_LENGTH,
+      HTTP_REQUEST);
+
+  test_simple_type(
+      "POST / HTTP/1.1\r\n"
+      "Content-Length:  42\r\n"
+      " \r\n",
+      HPE_OK,
       HTTP_REQUEST);
 
   //// RESPONSES
@@ -4268,10 +4385,15 @@ main (void)
 
   /// REQUESTS
 
+  test_simple("GET / IHTTP/1.0\r\n\r\n", HPE_INVALID_CONSTANT);
+  test_simple("GET / ICE/1.0\r\n\r\n", HPE_INVALID_CONSTANT);
   test_simple("GET / HTP/1.1\r\n\r\n", HPE_INVALID_VERSION);
   test_simple("GET / HTTP/01.1\r\n\r\n", HPE_INVALID_VERSION);
   test_simple("GET / HTTP/11.1\r\n\r\n", HPE_INVALID_VERSION);
   test_simple("GET / HTTP/1.01\r\n\r\n", HPE_INVALID_VERSION);
+
+  test_simple("GET / HTTP/1.0\r\nHello: w\1rld\r\n\r\n", HPE_INVALID_HEADER_TOKEN);
+  test_simple("GET / HTTP/1.0\r\nHello: woooo\2rld\r\n\r\n", HPE_INVALID_HEADER_TOKEN);
 
   // Extended characters - see nodejs/test/parallel/test-http-headers-obstext.js
   test_simple("GET / HTTP/1.1\r\n"
@@ -4285,6 +4407,12 @@ main (void)
               "\r\n"
               "fooba",
               HPE_OK);
+
+  // Unknown Transfer-Encoding in request
+  test_simple("GET / HTTP/1.1\r\n"
+              "Transfer-Encoding: unknown\r\n"
+              "\r\n",
+              HPE_INVALID_TRANSFER_ENCODING);
 
   static const char *all_methods[] = {
     "DELETE",

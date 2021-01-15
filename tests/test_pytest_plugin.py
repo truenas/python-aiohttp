@@ -4,18 +4,19 @@ import sys
 
 import pytest
 
-pytest_plugins = 'pytester'
+pytest_plugins = "pytester"
 
-CONFTEST = '''
+CONFTEST = """
 pytest_plugins = 'aiohttp.pytest_plugin'
-'''
+"""
 
 
-IS_PYPY = platform.python_implementation() == 'PyPy'
+IS_PYPY = platform.python_implementation() == "PyPy"
 
 
 def test_aiohttp_plugin(testdir) -> None:
-    testdir.makepyfile("""\
+    testdir.makepyfile(
+        """\
 import pytest
 from unittest import mock
 
@@ -145,14 +146,16 @@ async def test_custom_port_test_server(aiohttp_server, aiohttp_unused_port):
     server = await aiohttp_server(app, port=port)
     assert server.port == port
 
-""")
+"""
+    )
     testdir.makeconftest(CONFTEST)
-    result = testdir.runpytest('-p', 'no:sugar', '--aiohttp-loop=pyloop')
+    result = testdir.runpytest("-p", "no:sugar", "--aiohttp-loop=pyloop")
     result.assert_outcomes(passed=12)
 
 
 def test_warning_checks(testdir) -> None:
-    testdir.makepyfile("""\
+    testdir.makepyfile(
+        """\
 
 async def foobar():
     return 123
@@ -163,21 +166,24 @@ async def test_good() -> None:
 
 async def test_bad() -> None:
     foobar()
-""")
-    testdir.makeconftest(CONFTEST)
-    result = testdir.runpytest('-p', 'no:sugar', '-s', '-W',
-                               'default', '--aiohttp-loop=pyloop')
-    expected_outcomes = (
-        {'failed': 0, 'passed': 2}
-        if IS_PYPY and bool(os.environ.get('PYTHONASYNCIODEBUG'))
-        else {'failed': 1, 'passed': 1}
+"""
     )
-    """Under PyPy "coroutine 'foobar' was never awaited" does not happen."""
+    testdir.makeconftest(CONFTEST)
+    result = testdir.runpytest(
+        "-p", "no:sugar", "-s", "-W", "default", "--aiohttp-loop=pyloop"
+    )
+    expected_outcomes = (
+        {"failed": 0, "passed": 2}
+        if IS_PYPY and bool(os.environ.get("PYTHONASYNCIODEBUG"))
+        else {"failed": 1, "passed": 1}
+    )
+    # Under PyPy "coroutine 'foobar' was never awaited" does not happen.
     result.assert_outcomes(**expected_outcomes)
 
 
 def test_aiohttp_plugin_async_fixture(testdir, capsys) -> None:
-    testdir.makepyfile("""\
+    testdir.makepyfile(
+        """\
 import pytest
 
 from aiohttp import web
@@ -187,15 +193,15 @@ async def hello(request):
     return web.Response(body=b'Hello, world')
 
 
-def create_app(loop):
+def create_app():
     app = web.Application()
     app.router.add_route('GET', '/', hello)
     return app
 
 
 @pytest.fixture
-async def cli(aiohttp_client):
-    client = await aiohttp_client(create_app)
+async def cli(aiohttp_client, loop):
+    client = await aiohttp_client(create_app())
     return client
 
 
@@ -210,7 +216,7 @@ async def bar(request):
     return request.function
 
 
-async def test_hello(cli) -> None:
+async def test_hello(cli, loop) -> None:
     resp = await cli.get('/')
     assert resp.status == 200
 
@@ -226,19 +232,21 @@ def test_foo_without_loop(foo) -> None:
 
 def test_bar(loop, bar) -> None:
     assert bar is test_bar
-""")
+"""
+    )
     testdir.makeconftest(CONFTEST)
-    result = testdir.runpytest('-p', 'no:sugar', '--aiohttp-loop=pyloop')
-    result.assert_outcomes(passed=3, error=1)
+    result = testdir.runpytest("-p", "no:sugar", "--aiohttp-loop=pyloop")
+    result.assert_outcomes(passed=3, errors=1)
     result.stdout.fnmatch_lines(
         "*Asynchronous fixtures must depend on the 'loop' fixture "
         "or be used in tests depending from it."
     )
 
 
-@pytest.mark.skipif(sys.version_info < (3, 6), reason='old python')
+@pytest.mark.skipif(sys.version_info < (3, 6), reason="old python")
 def test_aiohttp_plugin_async_gen_fixture(testdir) -> None:
-    testdir.makepyfile("""\
+    testdir.makepyfile(
+        """\
 import pytest
 from unittest import mock
 
@@ -271,7 +279,8 @@ async def test_hello(cli) -> None:
 
 def test_finalized() -> None:
     assert canary.called is True
-""")
+"""
+    )
     testdir.makeconftest(CONFTEST)
-    result = testdir.runpytest('-p', 'no:sugar', '--aiohttp-loop=pyloop')
+    result = testdir.runpytest("-p", "no:sugar", "--aiohttp-loop=pyloop")
     result.assert_outcomes(passed=2)

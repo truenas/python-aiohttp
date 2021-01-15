@@ -1,19 +1,24 @@
+import asyncio
 import hashlib
 import pathlib
 import shutil
 import ssl
+import sys
 import tempfile
 import uuid
 
 import pytest
 
+from aiohttp.test_utils import loop_context
+
 try:
     import trustme
+
     TRUSTME = True
 except ImportError:
     TRUSTME = False
 
-pytest_plugins = ['aiohttp.pytest_plugin', 'pytester']
+pytest_plugins = ["aiohttp.pytest_plugin", "pytester"]
 
 
 @pytest.fixture
@@ -38,9 +43,9 @@ def tls_certificate_authority():
 @pytest.fixture
 def tls_certificate(tls_certificate_authority):
     return tls_certificate_authority.issue_server_cert(
-        'localhost',
-        '127.0.0.1',
-        '::1',
+        "localhost",
+        "127.0.0.1",
+        "::1",
     )
 
 
@@ -83,5 +88,22 @@ def tls_certificate_fingerprint_sha256(tls_certificate_pem_bytes):
 
 @pytest.fixture
 def pipe_name():
-    name = r'\\.\pipe\{}'.format(uuid.uuid4().hex)
+    name = fr"\\.\pipe\{uuid.uuid4().hex}"
     return name
+
+
+@pytest.fixture
+def selector_loop():
+    if sys.version_info < (3, 7):
+        policy = asyncio.get_event_loop_policy()
+        policy._loop_factory = asyncio.SelectorEventLoop  # type: ignore
+    else:
+        if sys.version_info >= (3, 8):
+            policy = asyncio.WindowsSelectorEventLoopPolicy()  # type: ignore
+        else:
+            policy = asyncio.DefaultEventLoopPolicy()
+        asyncio.set_event_loop_policy(policy)
+
+    with loop_context(policy.new_event_loop) as _loop:
+        asyncio.set_event_loop(_loop)
+        yield _loop

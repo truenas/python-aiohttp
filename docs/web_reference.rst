@@ -207,7 +207,7 @@ and :ref:`aiohttp-web-signals` handlers.
 
    .. attribute:: transport
 
-      An :ref:`transport<asyncio-transport>` used to process request,
+      A :ref:`transport<asyncio-transport>` used to process request.
       Read-only property.
 
       The property can be used, for example, for getting IP address of
@@ -363,6 +363,18 @@ and :ref:`aiohttp-web-signals` handlers.
                       headers container.
 
       :return: a cloned :class:`Request` instance.
+
+   .. method:: get_extra_info(name, default=None)
+
+      Reads extra information from the protocol's transport.
+      If no value associated with ``name`` is found, ``default`` is returned.
+
+      :param str name: The key to look up in the transport extra information.
+
+      :param default: Default value to be used when no value for ``name`` is
+                      found (default is ``None``).
+
+      .. versionadded:: 3.7
 
    .. comethod:: read()
 
@@ -677,7 +689,8 @@ StreamResponse
 
    .. method:: set_cookie(name, value, *, path='/', expires=None, \
                           domain=None, max_age=None, \
-                          secure=None, httponly=None, version=None)
+                          secure=None, httponly=None, version=None, \
+                          samesite=None)
 
       Convenient way for setting :attr:`cookies`, allows to specify
       some additional properties like *max_age* in a single call.
@@ -721,6 +734,14 @@ StreamResponse
                           version of the state management
                           specification the cookie
                           conforms. (Optional, *version=1* by default)
+
+      :param str samesite: Asserts that a cookie must not be sent with
+         cross-origin requests, providing some protection
+         against cross-site request forgery attacks.
+         Generally the value should be one of: ``None``,
+         ``Lax`` or ``Strict``. (optional)
+
+            .. versionadded:: 3.7
 
       .. warning::
 
@@ -770,7 +791,8 @@ StreamResponse
       calling this method.
 
       The coroutine calls :attr:`~aiohttp.web.Application.on_response_prepare`
-      signal handlers.
+      signal handlers after default headers have been computed and directly
+      before headers are sent.
 
    .. comethod:: write(data)
 
@@ -1085,7 +1107,7 @@ WebSocketResponse
 
       :param int code: closing code
 
-      :param message: optional payload of *pong* message,
+      :param message: optional payload of *close* message,
                       :class:`str` (converted to *UTF-8* encoded bytes)
                       or :class:`bytes`.
 
@@ -1351,10 +1373,11 @@ duplicated like one using :meth:`Application.copy`.
 
    .. attribute:: on_response_prepare
 
-      A :class:`~aiohttp.Signal` that is fired at the beginning
+      A :class:`~aiohttp.Signal` that is fired near the end
       of :meth:`StreamResponse.prepare` with parameters *request* and
       *response*. It can be used, for example, to add custom headers to each
-      response before sending.
+      response, or to modify the default headers computed by the application,
+      directly before sending the headers to the client.
 
       Signal handlers should have the following signature::
 
@@ -1460,11 +1483,18 @@ duplicated like one using :meth:`Application.copy`.
       The table is a :class:`list` of :class:`RouteDef` items or
       :class:`RouteTableDef`.
 
+      :returns: :class:`list` of registered :class:`AbstractRoute` instances.
+
       The method is a shortcut for
       ``app.router.add_routes(routes_table)``, see also
       :meth:`UrlDispatcher.add_routes`.
 
       .. versionadded:: 3.1
+
+      .. versionchanged:: 3.7
+
+         Return value updated from ``None`` to :class:`list` of
+         :class:`AbstractRoute` instances.
 
    .. method:: make_handler(loop=None, **kwargs)
 
@@ -1669,7 +1699,14 @@ Router is any object that implements :class:`AbstractRouter` interface.
       The table is a :class:`list` of :class:`RouteDef` items or
       :class:`RouteTableDef`.
 
+      :returns: :class:`list` of registered :class:`AbstractRoute` instances.
+
       .. versionadded:: 2.3
+
+      .. versionchanged:: 3.7
+
+         Return value updated from ``None`` to :class:`list` of
+         :class:`AbstractRoute` instances.
 
    .. method:: add_get(path, handler, *, name=None, allow_head=True, **kwargs)
 
@@ -2180,6 +2217,13 @@ The definition is created by functions like :func:`get` or
 
       Abstract method, should be overridden by subclasses.
 
+      :returns: :class:`list` of registered :class:`AbstractRoute` objects.
+
+      .. versionchanged:: 3.7
+
+         Return value updated from ``None`` to :class:`list` of
+         :class:`AbstractRoute` instances.
+
 
 .. class:: RouteDef
 
@@ -2565,6 +2609,37 @@ application on specific TCP or Unix socket, e.g.::
    :param kwargs: named parameters to pass into
                   web protocol.
 
+   Supported *kwargs*:
+
+   :param bool tcp_keepalive: Enable TCP Keep-Alive. Default: ``True``.
+   :param int keepalive_timeout: Number of seconds before closing Keep-Alive
+        connection. Default: ``75`` seconds (NGINX's default value).
+   :param logger: Custom logger object. Default:
+        :data:`aiohttp.log.server_logger`.
+   :param access_log: Custom logging object. Default:
+        :data:`aiohttp.log.access_logger`.
+   :param access_log_class: Class for `access_logger`. Default:
+        :data:`aiohttp.helpers.AccessLogger`.
+        Must to be a subclass of :class:`aiohttp.abc.AbstractAccessLogger`.
+   :param str access_log_format: Access log format string. Default:
+        :attr:`helpers.AccessLogger.LOG_FORMAT`.
+   :param int max_line_size: Optional maximum header line size. Default:
+        ``8190``.
+   :param int max_headers: Optional maximum header size. Default: ``32768``.
+   :param int max_field_size: Optional maximum header field size. Default:
+        ``8190``.
+
+   :param float lingering_time: Maximum time during which the server
+        reads and ignores additional data coming from the client when
+        lingering close is on.  Use ``0`` to disable lingering on
+        server channel closing.
+   :param int read_bufsize: Size of the read buffer (:attr:`BaseRequest.content`).
+                            ``None`` by default,
+                            it means that the session global value is used.
+
+      .. versionadded:: 3.7
+
+
    .. attribute:: app
 
       Read-only attribute for accessing to :class:`Application` served
@@ -2632,7 +2707,7 @@ application on specific TCP or Unix socket, e.g.::
 
    :param runner: a runner to serve.
 
-   :param str host: HOST to listen on, ``'0.0.0.0'`` if ``None`` (default).
+   :param str host: HOST to listen on, all interfaces if ``None`` (default).
 
    :param int port: PORT to listed on, ``8080`` if ``None`` (default).
 
