@@ -3,53 +3,12 @@ Date: Fri, 25 Oct 2019 13:35:51 -0300
 Subject: Add shebang to examples
 
 ---
- examples/cli_app.py       | 1 +
- examples/client_auth.py   | 1 +
- examples/client_json.py   | 1 +
- examples/fake_server.py   | 1 +
  examples/lowlevel_srv.py  | 1 +
  examples/server_simple.py | 1 +
- examples/static_files.py  | 1 +
- 7 files changed, 7 insertions(+)
+ 2 files changed, 2 insertions(+)
 
-diff --git a/examples/cli_app.py b/examples/cli_app.py
-index 1ca7db6..29c746e 100755
---- a/examples/cli_app.py
-+++ b/examples/cli_app.py
-@@ -1,3 +1,4 @@
-+#!/usr/bin/env python3
- """
- Example of serving an Application using the `aiohttp.web` CLI.
- 
-diff --git a/examples/client_auth.py b/examples/client_auth.py
-index 4e0b734..2517b5e 100755
---- a/examples/client_auth.py
-+++ b/examples/client_auth.py
-@@ -1,3 +1,4 @@
-+#!/usr/bin/env python3
- import asyncio
- 
- import aiohttp
-diff --git a/examples/client_json.py b/examples/client_json.py
-index db6d998..62ac6eb 100755
---- a/examples/client_json.py
-+++ b/examples/client_json.py
-@@ -1,3 +1,4 @@
-+#!/usr/bin/env python3
- import asyncio
- 
- import aiohttp
-diff --git a/examples/fake_server.py b/examples/fake_server.py
-index 7122c22..d281809 100755
---- a/examples/fake_server.py
-+++ b/examples/fake_server.py
-@@ -1,3 +1,4 @@
-+#!/usr/bin/env python3
- import asyncio
- import pathlib
- import socket
 diff --git a/examples/lowlevel_srv.py b/examples/lowlevel_srv.py
-index 214726e..58ce006 100644
+index 5a003f4..1fce9c4 100644
 --- a/examples/lowlevel_srv.py
 +++ b/examples/lowlevel_srv.py
 @@ -1,3 +1,4 @@
@@ -58,7 +17,7 @@ index 214726e..58ce006 100644
  
  from aiohttp import web
 diff --git a/examples/server_simple.py b/examples/server_simple.py
-index 2bf6aa6..deb2ac1 100644
+index d464383..c2b02e5 100644
 --- a/examples/server_simple.py
 +++ b/examples/server_simple.py
 @@ -1,3 +1,4 @@
@@ -66,12 +25,3 @@ index 2bf6aa6..deb2ac1 100644
  # server_simple.py
  from aiohttp import web
  
-diff --git a/examples/static_files.py b/examples/static_files.py
-index 426242a..1ce905b 100755
---- a/examples/static_files.py
-+++ b/examples/static_files.py
-@@ -1,3 +1,4 @@
-+#!/usr/bin/env python3
- import pathlib
- 
- from aiohttp import web
