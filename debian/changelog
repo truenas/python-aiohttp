@@ -22,6 +22,7 @@ python-aiohttp (3.7.3-1) unstable; urgency=medium
   * New upstream release
   * Patch documentation to remove "fork me on Github" button (privacy breach)
   * Standards-Version bumped to 4.5.1 (no changes needed)
+  * Update debian/copyright to mention vendor/http-parser files
 
  -- Piotr Ożarowski <piotr@debian.org>  Fri, 15 Jan 2021 20:52:09 +0100
 
